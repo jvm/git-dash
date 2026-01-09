@@ -7,6 +7,14 @@ use crate::discovery::RepoRef;
 use crate::status::RepoState;
 use crate::worker::{Action, WorkerCmd};
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum SortOrder {
+    Name,
+    Status,
+    AheadBehind,
+    LastFetch,
+}
+
 pub struct App {
     pub root: PathBuf,
     pub repos: Vec<RepoState>,
@@ -20,6 +28,7 @@ pub struct App {
     pub help_visible: bool,
     pub search_mode: bool,
     pub search_query: String,
+    pub sort_order: SortOrder,
 }
 
 impl App {
@@ -39,6 +48,7 @@ impl App {
             help_visible: false,
             search_mode: false,
             search_query: String::new(),
+            sort_order: SortOrder::Name,
         }
     }
 
@@ -174,12 +184,57 @@ impl App {
     }
 
     pub fn sort_repos(&mut self) {
-        self.repos.sort_by(|a, b| a.name.cmp(&b.name));
+        match self.sort_order {
+            SortOrder::Name => {
+                self.repos.sort_by(|a, b| a.name.cmp(&b.name));
+            }
+            SortOrder::Status => {
+                // Dirty repos first, then by name
+                self.repos
+                    .sort_by(|a, b| b.dirty.cmp(&a.dirty).then_with(|| a.name.cmp(&b.name)));
+            }
+            SortOrder::AheadBehind => {
+                // Repos with changes first (ahead or behind), then by name
+                self.repos.sort_by(|a, b| {
+                    let a_has_changes = a.ahead_behind != "-";
+                    let b_has_changes = b.ahead_behind != "-";
+                    b_has_changes
+                        .cmp(&a_has_changes)
+                        .then_with(|| a.name.cmp(&b.name))
+                });
+            }
+            SortOrder::LastFetch => {
+                // Most recently fetched first, then by name
+                self.repos.sort_by(|a, b| {
+                    a.last_fetch
+                        .cmp(&b.last_fetch)
+                        .then_with(|| a.name.cmp(&b.name))
+                });
+            }
+        }
+
         if self.repos.is_empty() {
             self.table_state.select(None);
         } else {
             self.table_state.select(Some(0));
         }
+    }
+
+    pub fn cycle_sort_order(&mut self) {
+        self.sort_order = match self.sort_order {
+            SortOrder::Name => SortOrder::Status,
+            SortOrder::Status => SortOrder::AheadBehind,
+            SortOrder::AheadBehind => SortOrder::LastFetch,
+            SortOrder::LastFetch => SortOrder::Name,
+        };
+        self.sort_repos();
+        let sort_name = match self.sort_order {
+            SortOrder::Name => "Name",
+            SortOrder::Status => "Status (dirty first)",
+            SortOrder::AheadBehind => "Ahead/Behind",
+            SortOrder::LastFetch => "Last Fetch",
+        };
+        self.set_status(format!("Sorted by: {}", sort_name));
     }
 
     pub fn toggle_help(&mut self) {

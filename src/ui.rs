@@ -47,7 +47,7 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
     };
 
     let footer = Block::default()
-        .title("q quit | r refresh | p pull | u push | / search | ? help")
+        .title("q quit | r refresh | p pull | u push | s sort | / search | ? help")
         .borders(Borders::ALL);
     let footer_paragraph = ratatui::widgets::Paragraph::new(footer_text)
         .block(footer)
@@ -198,6 +198,7 @@ fn render_help_overlay(frame: &mut Frame) {
         "  r              Refresh repository status",
         "",
         "VIEW",
+        "  s              Cycle sort order (Name → Status → Ahead/Behind → Last Fetch)",
         "  /              Search/filter repositories by name",
         "  Esc            Clear search filter",
         "  ?              Toggle this help screen",

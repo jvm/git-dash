@@ -157,6 +157,7 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
         KeyCode::Char('r') => app.request_refresh(),
         KeyCode::Char('p') => app.request_confirm(Action::Pull),
         KeyCode::Char('u') => app.request_confirm(Action::Push),
+        KeyCode::Char('s') => app.cycle_sort_order(),
         KeyCode::Char('?') => app.toggle_help(),
         KeyCode::Char('/') => app.enter_search_mode(),
         KeyCode::Esc => app.exit_search_mode(),
