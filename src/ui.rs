@@ -1,7 +1,9 @@
 use ratatui::layout::Alignment;
 use ratatui::prelude::*;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, TableState, Wrap,
+};
 
 use crate::app::App;
 use crate::status::RepoState;
@@ -34,6 +36,7 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
     } else {
         let table = build_table(&filtered_repos);
         frame.render_stateful_widget(table, chunks[1], &mut app.table_state);
+        render_scroll_hints(frame, chunks[1], filtered_count, &app.table_state);
     }
 
     // Build footer text with appropriate styling
@@ -248,6 +251,62 @@ fn render_empty_state(frame: &mut Frame, area: Rect) {
         .alignment(Alignment::Center);
 
     frame.render_widget(paragraph, area);
+}
+
+fn render_scroll_hints(frame: &mut Frame, area: Rect, total_rows: usize, state: &TableState) {
+    if total_rows == 0 {
+        return;
+    }
+
+    let inner = Block::default().borders(Borders::ALL).inner(area);
+    if inner.height < 2 || inner.width == 0 {
+        return;
+    }
+
+    let visible_rows = inner.height.saturating_sub(1) as usize;
+    if visible_rows == 0 {
+        return;
+    }
+
+    let offset = state.offset();
+    let visible_end = offset.saturating_add(visible_rows);
+    let show_top = offset > 0;
+    let show_bottom = visible_end < total_rows;
+
+    if !show_top && !show_bottom {
+        return;
+    }
+
+    let hint_style = Style::default().fg(Color::DarkGray);
+    let x = inner.x + inner.width.saturating_sub(1);
+    let top_y = inner.y.saturating_add(1);
+    let bottom_y = inner.y + inner.height.saturating_sub(1);
+
+    if show_top {
+        let rect = Rect {
+            x,
+            y: top_y,
+            width: 1,
+            height: 1,
+        };
+        let hint = Paragraph::new("↑")
+            .style(hint_style)
+            .alignment(Alignment::Center);
+        frame.render_widget(hint, rect);
+    }
+
+    if show_bottom {
+        let rect = Rect {
+            x,
+            y: bottom_y,
+            width: 1,
+            height: 1,
+        };
+        let hint = Paragraph::new("↓")
+            .style(hint_style)
+            .alignment(Alignment::Center);
+        frame.render_widget(hint, rect);
+    }
 }
 
 fn render_no_results_state(frame: &mut Frame, area: Rect, query: &str) {
