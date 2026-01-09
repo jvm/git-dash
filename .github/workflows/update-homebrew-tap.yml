@@ -1,0 +1,136 @@
+name: Update Homebrew Tap (PR)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 0.1.0)"
+        required: true
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  update-tap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            tag="${{ github.event.release.tag_name }}"
+            version="${tag#v}"
+          else
+            version="${{ inputs.version }}"
+          fi
+
+          if [ -z "$version" ]; then
+            echo "version is required" >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Download release assets and compute checksums
+        id: checksums
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          base="https://github.com/jvm/git-dash/releases/download/v${version}"
+          arm="git-dash-v${version}-aarch64-apple-darwin.tar.gz"
+          intel="git-dash-v${version}-x86_64-apple-darwin.tar.gz"
+
+          curl -L -o "$arm" "$base/$arm"
+          curl -L -o "$intel" "$base/$intel"
+
+          arm_sha=$(shasum -a 256 "$arm" | awk '{print $1}')
+          intel_sha=$(shasum -a 256 "$intel" | awk '{print $1}')
+
+          echo "arm_sha=$arm_sha" >> "$GITHUB_OUTPUT"
+          echo "intel_sha=$intel_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: jvm/homebrew-tap
+          token: ${{ secrets.TAP_REPO_TOKEN }}
+          path: tap
+
+      - name: Update formula
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARM_SHA: ${{ steps.checksums.outputs.arm_sha }}
+          INTEL_SHA: ${{ steps.checksums.outputs.intel_sha }}
+          FORMULA: tap/Formula/git-dash.rb
+        run: |
+          python - <<'PY'
+          import os
+          import re
+
+          version = os.environ["VERSION"]
+          arm_sha = os.environ["ARM_SHA"]
+          intel_sha = os.environ["INTEL_SHA"]
+          path = os.environ["FORMULA"]
+
+          with open(path, "r", encoding="utf-8") as f:
+              text = f.read()
+
+          text = re.sub(
+              r'version "\d+\.\d+\.\d+"',
+              f'version "{version}"',
+              text,
+          )
+          text = re.sub(
+              r'https://github.com/jvm/git-dash/releases/download/v[0-9.]+/git-dash-v[0-9.]+-aarch64-apple-darwin.tar.gz',
+              f'https://github.com/jvm/git-dash/releases/download/v{version}/git-dash-v{version}-aarch64-apple-darwin.tar.gz',
+              text,
+          )
+          text = re.sub(
+              r'https://github.com/jvm/git-dash/releases/download/v[0-9.]+/git-dash-v[0-9.]+-x86_64-apple-darwin.tar.gz',
+              f'https://github.com/jvm/git-dash/releases/download/v{version}/git-dash-v{version}-x86_64-apple-darwin.tar.gz',
+              text,
+          )
+          text = re.sub(
+              r'(aarch64-apple-darwin\.tar\.gz"\n\s+sha256 ")\S+(")',
+              r"\1" + arm_sha + r"\2",
+              text,
+          )
+          text = re.sub(
+              r'(x86_64-apple-darwin\.tar\.gz"\n\s+sha256 ")\S+(")',
+              r"\1" + intel_sha + r"\2",
+              text,
+          )
+
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(text)
+          PY
+
+      - name: Commit changes
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          branch="update-git-dash-${version}"
+          cd tap
+          git checkout -b "$branch"
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add Formula/git-dash.rb
+          git commit -m "Update git-dash to v${version}"
+          git push -u origin "$branch"
+
+      - name: Open pull request
+        env:
+          GH_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          branch="update-git-dash-${version}"
+          if gh pr view --repo jvm/homebrew-tap --head "$branch" >/dev/null 2>&1; then
+            echo "PR already exists for $branch"
+            exit 0
+          fi
+          gh pr create \
+            --repo jvm/homebrew-tap \
+            --title "Update git-dash to v${version}" \
+            --body "Automated update from git-dash release v${version}." \
+            --head "$branch" \
+            --base main
