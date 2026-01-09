@@ -35,17 +35,33 @@ jobs:
 
       - name: Download release assets and compute checksums
         id: checksums
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          version="${{ steps.version.outputs.version }}"
+          set -euo pipefail
+          version="${VERSION}"
           base="https://github.com/jvm/git-dash/releases/download/v${version}"
           arm="git-dash-v${version}-aarch64-apple-darwin.tar.gz"
           intel="git-dash-v${version}-x86_64-apple-darwin.tar.gz"
 
-          curl -L -o "$arm" "$base/$arm"
-          curl -L -o "$intel" "$base/$intel"
+          for asset in "$arm" "$intel"; do
+            url="$base/$asset"
+            curl -fL --retry 3 --retry-delay 2 -o "$asset" "$url"
+            tar -tzf "$asset" >/dev/null
+            size=$(wc -c < "$asset")
+            if [ "$size" -lt 100000 ]; then
+              echo "downloaded asset too small: $asset ($size bytes)" >&2
+              exit 1
+            fi
+          done
 
           arm_sha=$(shasum -a 256 "$arm" | awk '{print $1}')
           intel_sha=$(shasum -a 256 "$intel" | awk '{print $1}')
+
+          if [ "$arm_sha" = "$intel_sha" ]; then
+            echo "arm and intel checksums are identical; aborting" >&2
+            exit 1
+          fi
 
           echo "arm_sha=$arm_sha" >> "$GITHUB_OUTPUT"
           echo "intel_sha=$intel_sha" >> "$GITHUB_OUTPUT"
@@ -76,30 +92,41 @@ jobs:
           with open(path, "r", encoding="utf-8") as f:
               text = f.read()
 
-          text = re.sub(
+          def replace_once(pattern, repl, src, label):
+              updated, count = re.subn(pattern, repl, src, flags=re.MULTILINE)
+              if count != 1:
+                  raise SystemExit(f"expected 1 {label} replacement, got {count}")
+              return updated
+
+          text = replace_once(
               r'version "\d+\.\d+\.\d+"',
               f'version "{version}"',
               text,
+              "version",
           )
-          text = re.sub(
-              r'https://github.com/jvm/git-dash/releases/download/v[0-9.]+/git-dash-v[0-9.]+-aarch64-apple-darwin.tar.gz',
-              f'https://github.com/jvm/git-dash/releases/download/v{version}/git-dash-v{version}-aarch64-apple-darwin.tar.gz',
+          text = replace_once(
+              r'(url "https://github.com/jvm/git-dash/releases/download/v)[^/]+(/git-dash-v)[^/]+(-aarch64-apple-darwin\.tar\.gz")',
+              rf"\1{version}\2{version}\3",
               text,
+              "arm url",
           )
-          text = re.sub(
-              r'https://github.com/jvm/git-dash/releases/download/v[0-9.]+/git-dash-v[0-9.]+-x86_64-apple-darwin.tar.gz',
-              f'https://github.com/jvm/git-dash/releases/download/v{version}/git-dash-v{version}-x86_64-apple-darwin.tar.gz',
+          text = replace_once(
+              r'(url "https://github.com/jvm/git-dash/releases/download/v)[^/]+(/git-dash-v)[^/]+(-x86_64-apple-darwin\.tar\.gz")',
+              rf"\1{version}\2{version}\3",
               text,
+              "intel url",
           )
-          text = re.sub(
-              r'(aarch64-apple-darwin\.tar\.gz"\n\s+sha256 ")\S+(")',
-              r"\1" + arm_sha + r"\2",
+          text = replace_once(
+              r'(aarch64-apple-darwin\.tar\.gz"\n\s+sha256 ")[^"]+(")',
+              rf"\1{arm_sha}\2",
               text,
+              "arm sha",
           )
-          text = re.sub(
-              r'(x86_64-apple-darwin\.tar\.gz"\n\s+sha256 ")\S+(")',
-              r"\1" + intel_sha + r"\2",
+          text = replace_once(
+              r'(x86_64-apple-darwin\.tar\.gz"\n\s+sha256 ")[^"]+(")',
+              rf"\1{intel_sha}\2",
               text,
+              "intel sha",
           )
 
           with open(path, "w", encoding="utf-8") as f:
@@ -107,18 +134,26 @@ jobs:
           PY
 
       - name: Commit changes
+        id: commit
         run: |
           version="${{ steps.version.outputs.version }}"
           branch="update-git-dash-${version}"
           cd tap
-          git checkout -b "$branch"
+          git checkout -B "$branch"
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add Formula/git-dash.rb
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git commit -m "Update git-dash to v${version}"
-          git push -u origin "$branch"
+          git push -u origin "$branch" --force
+          echo "changed=true" >> "$GITHUB_OUTPUT"
 
       - name: Open pull request
+        if: steps.commit.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.TAP_REPO_TOKEN }}
         run: |
