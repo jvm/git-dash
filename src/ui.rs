@@ -1,5 +1,5 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Cell, Gauge, Row, Table, Wrap};
+use ratatui::widgets::{Block, Borders, Cell, Clear, Gauge, Row, Table, Wrap};
 
 use crate::app::App;
 use crate::status::RepoState;
@@ -33,12 +33,17 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
     };
 
     let footer = Block::default()
-        .title("q quit | r refresh | p pull | u push | j/k ↓↑ | PgUp/PgDn | Esc cancel")
+        .title("q quit | r refresh | p pull | u push | ? help")
         .borders(Borders::ALL);
     let footer_paragraph = ratatui::widgets::Paragraph::new(footer_text)
         .block(footer)
         .wrap(Wrap { trim: true });
     frame.render_widget(footer_paragraph, chunks[2]);
+
+    // Render help overlay on top if visible
+    if app.help_visible {
+        render_help_overlay(frame);
+    }
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -51,9 +56,35 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Min(10), Constraint::Length(32)])
         .split(inner);
 
-    let title = ratatui::widgets::Paragraph::new(format!("git-dash — {}", app.root.display()))
-        .wrap(Wrap { trim: true });
-    frame.render_widget(title, header_chunks[0]);
+    // Calculate repository statistics
+    let total_repos = app.repos.len();
+    let dirty_count = app.repos.iter().filter(|r| r.dirty).count();
+    let ahead_count = app
+        .repos
+        .iter()
+        .filter(|r| r.ahead_behind.contains('↑'))
+        .count();
+    let behind_count = app
+        .repos
+        .iter()
+        .filter(|r| r.ahead_behind.contains('↓'))
+        .count();
+
+    let title = if !app.loading && total_repos > 0 {
+        format!(
+            "git-dash — {} │ {} repos │ {} dirty │ {} ahead │ {} behind",
+            app.root.display(),
+            total_repos,
+            dirty_count,
+            ahead_count,
+            behind_count
+        )
+    } else {
+        format!("git-dash — {}", app.root.display())
+    };
+
+    let title_paragraph = ratatui::widgets::Paragraph::new(title).wrap(Wrap { trim: true });
+    frame.render_widget(title_paragraph, header_chunks[0]);
 
     if app.loading {
         let ratio = app.scan_progress.clamp(0.0, 1.0);
@@ -119,4 +150,59 @@ fn build_table(repos: &[RepoState]) -> Table<'_> {
     .header(header)
     .block(Block::default().borders(Borders::ALL).title("Repositories"))
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+}
+
+fn render_help_overlay(frame: &mut Frame) {
+    let area = frame.area();
+
+    // Create centered popup area
+    let popup_width = 60.min(area.width.saturating_sub(4));
+    let popup_height = 20.min(area.height.saturating_sub(4));
+    let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = (area.height.saturating_sub(popup_height)) / 2;
+
+    let popup_area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    // Help text content
+    let help_text = vec![
+        "NAVIGATION",
+        "  j / ↓          Move selection down",
+        "  k / ↑          Move selection up",
+        "  PgDn           Page down",
+        "  PgUp           Page up",
+        "  g / Home       Jump to first repository",
+        "  G / End        Jump to last repository",
+        "",
+        "ACTIONS",
+        "  p              Pull (with confirmation)",
+        "  u              Push (with confirmation)",
+        "  r              Refresh repository status",
+        "",
+        "VIEW",
+        "  ?              Toggle this help screen",
+        "",
+        "OTHER",
+        "  q / Ctrl+C     Quit git-dash",
+        "  y              Confirm action",
+        "  n / Esc        Cancel action",
+    ];
+
+    let help_paragraph = ratatui::widgets::Paragraph::new(help_text.join("\n"))
+        .block(
+            Block::default()
+                .title(" Help (press any key to close) ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .style(Style::default().bg(Color::Black))
+        .wrap(Wrap { trim: false });
+
+    // Clear the area behind the popup
+    frame.render_widget(Clear, popup_area);
+    frame.render_widget(help_paragraph, popup_area);
 }

@@ -17,6 +17,7 @@ pub struct App {
     pub scan_progress: f64,
     pub confirmation: Option<Action>,
     pub should_quit: bool,
+    pub help_visible: bool,
 }
 
 impl App {
@@ -33,6 +34,7 @@ impl App {
             scan_progress: 0.0,
             confirmation: None,
             should_quit: false,
+            help_visible: false,
         }
     }
 
@@ -141,6 +143,19 @@ impl App {
         self.table_state.select(Some(i));
     }
 
+    pub fn jump_to_first(&mut self) {
+        if !self.repos.is_empty() {
+            self.table_state.select(Some(0));
+        }
+    }
+
+    pub fn jump_to_last(&mut self) {
+        let len = self.repos.len();
+        if len > 0 {
+            self.table_state.select(Some(len - 1));
+        }
+    }
+
     pub fn selected_repo(&self) -> Option<&RepoState> {
         self.table_state.selected().and_then(|i| self.repos.get(i))
     }
@@ -156,5 +171,9 @@ impl App {
         } else {
             self.table_state.select(Some(0));
         }
+    }
+
+    pub fn toggle_help(&mut self) {
+        self.help_visible = !self.help_visible;
     }
 }

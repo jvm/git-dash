@@ -135,6 +135,12 @@ fn run_app(
 }
 
 fn handle_key_event(app: &mut App, key: KeyEvent) {
+    // Help screen takes priority - close it with any key
+    if app.help_visible {
+        app.toggle_help();
+        return;
+    }
+
     if app.confirmation.is_some() {
         handle_confirm_key(app, key);
         return;
@@ -145,10 +151,13 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
         KeyCode::Char('r') => app.request_refresh(),
         KeyCode::Char('p') => app.request_confirm(Action::Pull),
         KeyCode::Char('u') => app.request_confirm(Action::Push),
+        KeyCode::Char('?') => app.toggle_help(),
         KeyCode::Down | KeyCode::Char('j') => app.next(),
         KeyCode::Up | KeyCode::Char('k') => app.previous(),
         KeyCode::PageDown => app.page_down(),
         KeyCode::PageUp => app.page_up(),
+        KeyCode::Home | KeyCode::Char('g') => app.jump_to_first(),
+        KeyCode::End | KeyCode::Char('G') => app.jump_to_last(),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.should_quit = true
         }
