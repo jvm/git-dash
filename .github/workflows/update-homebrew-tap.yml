@@ -37,16 +37,21 @@ jobs:
         id: checksums
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version="${VERSION}"
           base="https://github.com/jvm/git-dash/releases/download/v${version}"
           arm="git-dash-v${version}-aarch64-apple-darwin.tar.gz"
           intel="git-dash-v${version}-x86_64-apple-darwin.tar.gz"
+          auth_header=()
+          if [ -n "${GITHUB_TOKEN:-}" ]; then
+            auth_header=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
+          fi
 
           for asset in "$arm" "$intel"; do
             url="$base/$asset"
-            curl -fL --retry 3 --retry-delay 2 -o "$asset" "$url"
+            curl -fL --retry 3 --retry-delay 2 "${auth_header[@]}" -o "$asset" "$url"
             tar -tzf "$asset" >/dev/null
             size=$(wc -c < "$asset")
             if [ "$size" -lt 100000 ]; then
