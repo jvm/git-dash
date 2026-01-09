@@ -13,7 +13,7 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
             Constraint::Min(5),
             Constraint::Length(3),
         ])
-        .split(frame.size());
+        .split(frame.area());
 
     render_header(frame, chunks[0], app);
 
@@ -118,5 +118,5 @@ fn build_table(repos: &[RepoState]) -> Table<'_> {
     )
     .header(header)
     .block(Block::default().borders(Borders::ALL).title("Repositories"))
-    .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
 }

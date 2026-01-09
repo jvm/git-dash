@@ -11,5 +11,5 @@ keywords = ["git", "tui", "terminal", "dashboard", "repositories"]
 categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
-ratatui = "0.26"
-crossterm = "0.27"
+ratatui = "0.30"
+crossterm = "0.29"
