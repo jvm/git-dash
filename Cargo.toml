@@ -1,0 +1,15 @@
+[package]
+name = "git-dash"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jose Mocito"]
+license = "MIT"
+description = "A fast TUI dashboard for discovering and managing multiple Git repositories"
+repository = "https://github.com/jvm/git-dash"
+readme = "README.md"
+keywords = ["git", "tui", "terminal", "dashboard", "repositories"]
+categories = ["command-line-utilities", "development-tools"]
+
+[dependencies]
+ratatui = "0.26"
+crossterm = "0.27"
