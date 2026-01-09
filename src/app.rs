@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
+use std::time::Instant;
 
 use ratatui::widgets::TableState;
 
@@ -15,12 +16,23 @@ pub enum SortOrder {
     LastFetch,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+#[allow(dead_code)]
+pub enum StatusType {
+    Success,
+    Error,
+    Warning,
+    Info,
+}
+
 pub struct App {
     pub root: PathBuf,
     pub repos: Vec<RepoState>,
     pub table_state: TableState,
     pub cmd_tx: Sender<WorkerCmd>,
     pub status_line: String,
+    pub status_type: StatusType,
+    pub status_timestamp: Instant,
     pub loading: bool,
     pub scan_progress: f64,
     pub confirmation: Option<Action>,
@@ -41,6 +53,8 @@ impl App {
             table_state,
             cmd_tx,
             status_line: "Ready".to_string(),
+            status_type: StatusType::Info,
+            status_timestamp: Instant::now(),
             loading: false,
             scan_progress: 0.0,
             confirmation: None,
@@ -180,7 +194,13 @@ impl App {
     }
 
     pub fn set_status(&mut self, status: String) {
+        self.set_status_with_type(status, StatusType::Info);
+    }
+
+    pub fn set_status_with_type(&mut self, status: String, status_type: StatusType) {
         self.status_line = status;
+        self.status_type = status_type;
+        self.status_timestamp = Instant::now();
     }
 
     pub fn sort_repos(&mut self) {

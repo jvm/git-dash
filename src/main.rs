@@ -18,7 +18,7 @@ use crossterm::terminal::{
 };
 use ratatui::prelude::*;
 
-use app::App;
+use app::{App, StatusType};
 use git::friendly_error;
 use logger::{init_logger, log_debug};
 use status::git_status;
@@ -208,12 +208,12 @@ fn drain_worker_events(app: &mut App, evt_rx: &mpsc::Receiver<WorkerEvent>) {
                 app.sort_repos();
                 app.loading = false;
                 app.scan_progress = 1.0;
-                app.set_status("Scan complete".to_string());
+                app.set_status_with_type("Scan complete".to_string(), StatusType::Success);
             }
             WorkerEvent::RefreshComplete(repos) => {
                 app.repos = repos;
                 app.sort_repos();
-                app.set_status("Status refreshed".to_string());
+                app.set_status_with_type("Status refreshed".to_string(), StatusType::Success);
             }
             WorkerEvent::ScanProgress { ratio } => {
                 app.scan_progress = ratio;
@@ -228,10 +228,16 @@ fn drain_worker_events(app: &mut App, evt_rx: &mpsc::Receiver<WorkerEvent>) {
                     Action::Push => "Push",
                 };
                 match result {
-                    Ok(message) => app.set_status(format!("{action_label} OK: {message}")),
+                    Ok(message) => app.set_status_with_type(
+                        format!("{action_label} OK: {message}"),
+                        StatusType::Success,
+                    ),
                     Err(message) => {
                         let friendly_msg = friendly_error(&message);
-                        app.set_status(format!("{action_label} failed: {friendly_msg}"))
+                        app.set_status_with_type(
+                            format!("{action_label} failed: {friendly_msg}"),
+                            StatusType::Error,
+                        )
                     }
                 }
                 if let Some(repo) = app.repos.iter_mut().find(|repo| repo.path == path) {

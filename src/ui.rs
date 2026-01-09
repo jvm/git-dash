@@ -35,23 +35,48 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
         frame.render_stateful_widget(table, chunks[1], &mut app.table_state);
     }
 
-    let footer_text = if app.search_mode {
-        format!("Search: {}_", app.search_query)
+    // Build footer text with appropriate styling
+    let (footer_text, footer_style) = if app.search_mode {
+        (
+            format!("Search: {}_", app.search_query),
+            Style::default().fg(Color::Yellow),
+        )
     } else if !search_query.is_empty() {
-        format!(
-            "Filtered: {}/{} repos matching \"{}\" | {}",
-            filtered_count, total_count, search_query, status_line
+        (
+            format!(
+                "Filtered: {}/{} repos matching \"{}\" | {}",
+                filtered_count, total_count, search_query, status_line
+            ),
+            Style::default(),
         )
     } else if let Some(action) = &app.confirmation {
         let label = match action {
             Action::Pull => "Pull",
             Action::Push => "Push",
         };
-        format!("Confirm {label}? (y/n)")
+        (
+            format!("Confirm {label}? (y/n)"),
+            Style::default().fg(Color::Yellow),
+        )
     } else if app.loading {
-        "Scanning repositories...".to_string()
+        ("Scanning repositories...".to_string(), Style::default())
     } else {
-        app.status_line.clone()
+        // Add timestamp for recent messages (< 5s old)
+        let elapsed = app.status_timestamp.elapsed();
+        let with_timestamp = if elapsed.as_secs() < 5 {
+            format!("{} ({}s ago)", app.status_line, elapsed.as_secs())
+        } else {
+            app.status_line.clone()
+        };
+
+        let color = match app.status_type {
+            crate::app::StatusType::Success => Color::Green,
+            crate::app::StatusType::Error => Color::Red,
+            crate::app::StatusType::Warning => Color::Yellow,
+            crate::app::StatusType::Info => Color::Reset,
+        };
+
+        (with_timestamp, Style::default().fg(color))
     };
 
     let footer = Block::default()
@@ -59,6 +84,7 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
         .borders(Borders::ALL);
     let footer_paragraph = Paragraph::new(footer_text)
         .block(footer)
+        .style(footer_style)
         .wrap(Wrap { trim: true });
     frame.render_widget(footer_paragraph, chunks[2]);
 
