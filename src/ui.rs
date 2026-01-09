@@ -131,21 +131,47 @@ fn build_table(repos: &[RepoState]) -> Table<'_> {
             Style::default().fg(Color::Cyan)
         };
 
-        // Show error message in the changes column if present
-        let change_display = if let Some(err) = &repo.error_message {
-            format!("{} ({})", repo.change_summary, err)
+        // Color-code ahead/behind based on status
+        let ahead_behind_style = if repo.ahead_behind == "-" {
+            Style::default().fg(Color::DarkGray)
+        } else if repo.ahead_behind.contains('↑') && repo.ahead_behind.contains('↓') {
+            // Diverged - both ahead and behind
+            Style::default().fg(Color::Red)
+        } else if repo.ahead_behind.contains('↑') {
+            // Only ahead
+            Style::default().fg(Color::Green)
+        } else if repo.ahead_behind.contains('↓') {
+            // Only behind
+            Style::default().fg(Color::Yellow)
         } else {
-            repo.change_summary.clone()
+            Style::default()
         };
+
+        // Show error message in the changes column if present
+        let (change_display, has_error) = if let Some(err) = &repo.error_message {
+            (format!("⚠ {}", err), true)
+        } else {
+            (repo.change_summary.clone(), false)
+        };
+
+        // Style the change column - red if error, default otherwise
+        let change_style = if has_error {
+            Style::default().fg(Color::Red)
+        } else {
+            Style::default()
+        };
+
+        // Color-code last fetch by staleness
+        let fetch_style = get_staleness_style(&repo.last_fetch);
 
         Row::new(vec![
             Cell::from(repo.name.clone()),
             Cell::from(repo.branch.clone()),
             Cell::from(dirty).style(dirty_style),
-            Cell::from(repo.ahead_behind.clone()),
-            Cell::from(change_display),
+            Cell::from(repo.ahead_behind.clone()).style(ahead_behind_style),
+            Cell::from(change_display).style(change_style),
             Cell::from(repo.remote_url.clone()),
-            Cell::from(repo.last_fetch.clone()),
+            Cell::from(repo.last_fetch.clone()).style(fetch_style),
         ])
     });
 
@@ -164,6 +190,35 @@ fn build_table(repos: &[RepoState]) -> Table<'_> {
     .header(header)
     .block(Block::default().borders(Borders::ALL).title("Repositories"))
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+}
+
+fn get_staleness_style(last_fetch: &str) -> Style {
+    // Parse the age from strings like "2d", "5h", "30m", etc.
+    if last_fetch == "-" {
+        return Style::default().fg(Color::DarkGray);
+    }
+
+    // Extract the numeric value and unit
+    let trimmed = last_fetch.trim();
+    if let Some(d_pos) = trimmed.find('d') {
+        // Days
+        if let Ok(days) = trimmed[..d_pos].parse::<u64>() {
+            return if days == 0 {
+                Style::default().fg(Color::Green)
+            } else if days < 7 {
+                Style::default()
+            } else if days < 30 {
+                Style::default().fg(Color::Yellow)
+            } else {
+                Style::default().fg(Color::Red)
+            };
+        }
+    } else if trimmed.ends_with('h') || trimmed.ends_with('m') || trimmed.ends_with('s') {
+        // Hours, minutes, or seconds - all less than a day
+        return Style::default().fg(Color::Green);
+    }
+
+    Style::default()
 }
 
 fn render_help_overlay(frame: &mut Frame) {
