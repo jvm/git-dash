@@ -1,5 +1,6 @@
+use ratatui::layout::Alignment;
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Cell, Clear, Gauge, Row, Table, Wrap};
+use ratatui::widgets::{Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, Wrap};
 
 use crate::app::App;
 use crate::status::RepoState;
@@ -24,8 +25,15 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
     let search_query = app.search_query.clone();
     let status_line = app.status_line.clone();
 
-    let table = build_table(&filtered_repos);
-    frame.render_stateful_widget(table, chunks[1], &mut app.table_state);
+    // Show empty state if no repos found
+    if total_count == 0 && !app.loading {
+        render_empty_state(frame, chunks[1]);
+    } else if filtered_count == 0 && !search_query.is_empty() {
+        render_no_results_state(frame, chunks[1], &search_query);
+    } else {
+        let table = build_table(&filtered_repos);
+        frame.render_stateful_widget(table, chunks[1], &mut app.table_state);
+    }
 
     let footer_text = if app.search_mode {
         format!("Search: {}_", app.search_query)
@@ -49,7 +57,7 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
     let footer = Block::default()
         .title("q quit | r refresh | p pull | u push | s sort | / search | ? help")
         .borders(Borders::ALL);
-    let footer_paragraph = ratatui::widgets::Paragraph::new(footer_text)
+    let footer_paragraph = Paragraph::new(footer_text)
         .block(footer)
         .wrap(Wrap { trim: true });
     frame.render_widget(footer_paragraph, chunks[2]);
@@ -97,7 +105,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         format!("git-dash — {}", app.root.display())
     };
 
-    let title_paragraph = ratatui::widgets::Paragraph::new(title).wrap(Wrap { trim: true });
+    let title_paragraph = Paragraph::new(title).wrap(Wrap { trim: true });
     frame.render_widget(title_paragraph, header_chunks[0]);
 
     if app.loading {
@@ -192,6 +200,56 @@ fn build_table(repos: &[RepoState]) -> Table<'_> {
     .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
 }
 
+fn render_empty_state(frame: &mut Frame, area: Rect) {
+    let empty_text = [
+        "",
+        "",
+        "         No Git repositories found",
+        "",
+        "    Try scanning a different directory:",
+        "         git-dash /path/to/projects",
+        "",
+        "",
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Repositories")
+        .style(Style::default().fg(Color::DarkGray));
+
+    let paragraph = Paragraph::new(empty_text.join("\n"))
+        .block(block)
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
+
+    frame.render_widget(paragraph, area);
+}
+
+fn render_no_results_state(frame: &mut Frame, area: Rect, query: &str) {
+    let message = format!("         No repositories matching \"{}\"", query);
+    let no_results_text = [
+        "".to_string(),
+        "".to_string(),
+        message,
+        "".to_string(),
+        "    Try a different search term or press Esc to clear".to_string(),
+        "".to_string(),
+        "".to_string(),
+    ];
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title("Repositories")
+        .style(Style::default().fg(Color::DarkGray));
+
+    let paragraph = Paragraph::new(no_results_text.join("\n"))
+        .block(block)
+        .style(Style::default().fg(Color::Yellow))
+        .alignment(Alignment::Center);
+
+    frame.render_widget(paragraph, area);
+}
+
 fn get_staleness_style(last_fetch: &str) -> Style {
     // Parse the age from strings like "2d", "5h", "30m", etc.
     if last_fetch == "-" {
@@ -264,7 +322,7 @@ fn render_help_overlay(frame: &mut Frame) {
         "  n / Esc        Cancel action",
     ];
 
-    let help_paragraph = ratatui::widgets::Paragraph::new(help_text.join("\n"))
+    let help_paragraph = Paragraph::new(help_text.join("\n"))
         .block(
             Block::default()
                 .title(" Help (press any key to close) ")
