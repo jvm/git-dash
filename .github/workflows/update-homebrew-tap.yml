@@ -159,7 +159,8 @@ jobs:
         run: |
           version="${{ steps.version.outputs.version }}"
           branch="update-git-dash-${version}"
-          if gh pr view --repo jvm/homebrew-tap --head "$branch" >/dev/null 2>&1; then
+          existing=$(gh pr list --repo jvm/homebrew-tap --head "$branch" --json number --jq 'length')
+          if [ "$existing" -gt 0 ]; then
             echo "PR already exists for $branch"
             exit 0
           fi
