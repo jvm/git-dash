@@ -32,6 +32,10 @@ Suggested module splits: discovery, status parsing, UI rendering, and background
 - Use short, imperative commit summaries (e.g., “Add repo scanner”).
 - PRs should include a concise description, linked issues when relevant, and screenshots or terminal captures for UI changes.
 
+## Releases
+
+Follow the steps in `RELEASE.md` when preparing a release.
+
 ## Security & Configuration
 
 The tool is local-first. Do not add telemetry or network access beyond invoking Git. If configuration is introduced later, document safe defaults and avoid handling credentials directly.

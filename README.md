@@ -30,7 +30,7 @@ brew install jvm/tap/git-dash
 cargo install --path .
 ```
 
-### From crates.io (when published)
+### From crates.io
 
 ```sh
 cargo install git-dash
@@ -195,6 +195,10 @@ cargo clippy --all-targets --all-features  # Lint
 cargo test             # Run tests
 cargo build --release  # Build
 ```
+
+## Release
+
+See `RELEASE.md` for the full release checklist and workflow.
 
 ### Optional Tools
 

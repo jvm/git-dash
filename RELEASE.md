@@ -2,125 +2,86 @@
 
 Follow these steps to create a new release.
 
+## Prerequisites
+
+- `gh auth status` is logged in.
+- `cargo login` is done and your crates.io email is verified.
+- macOS targets installed:
+  ```sh
+  rustup target add x86_64-apple-darwin
+  rustup target add aarch64-apple-darwin
+  ```
+
 ## Pre-Release Checklist
 
-- [ ] All tests passing (`just check`)
 - [ ] Version updated in `Cargo.toml`
-- [ ] Version updated in `homebrew/git-dash.rb`
+- [ ] `Cargo.lock` updated
+- [ ] All tests passing (`just check`)
+- [ ] Documentation updated (README/RELEASE as needed)
 - [ ] CHANGELOG updated (if exists)
-- [ ] Documentation updated
 
-## Building Release Binaries
+## Release Steps (Canonical)
 
-### Option 1: Just (Recommended)
+1. **Run quality checks**
+   ```sh
+   just check
+   ```
 
-Build both macOS targets, create tarballs, and print SHA256 checksums:
-```sh
-just build-release VERSION=0.1.0
-```
+2. **Build release artifacts**
+   ```sh
+   just build-release VERSION=0.1.1
+   ```
 
-This runs `scripts/build-release.sh` under the hood.
+3. **Create and push tag**
+   ```sh
+   git tag -a v0.1.1 -m "Release v0.1.1"
+   git push origin v0.1.1
+   ```
 
-### Option 2: Manual Build (if you have both architectures)
+4. **Create GitHub release and upload tarballs**
+   ```sh
+   gh release create v0.1.1 \
+     git-dash-v0.1.1-aarch64-apple-darwin.tar.gz \
+     git-dash-v0.1.1-x86_64-apple-darwin.tar.gz \
+     -t "v0.1.1" \
+     -n "Release v0.1.1."
+   ```
 
-**On Intel Mac:**
+5. **Update Homebrew tap**
+   ```sh
+   gh workflow run update-homebrew-tap.yml -f version=0.1.1
+   ```
+   Merge the resulting PR in `jvm/homebrew-tap`.
+
+6. **Publish to crates.io**
+   ```sh
+   cargo publish --dry-run
+   cargo publish
+   ```
+
+7. **Cleanup local artifacts**
+   ```sh
+   rm -f git-dash-v0.1.1-*-apple-darwin.tar.gz
+   ```
+
+## Building Release Binaries (Details)
+
+The canonical path is `just build-release`, which runs `scripts/build-release.sh`.
+
+Manual fallback:
 ```sh
 cargo build --release --target x86_64-apple-darwin
-cd target/x86_64-apple-darwin/release
-tar -czf git-dash-v0.1.0-x86_64-apple-darwin.tar.gz git-dash
-shasum -a 256 git-dash-v0.1.0-x86_64-apple-darwin.tar.gz
-```
-
-**On Apple Silicon Mac:**
-```sh
-cargo build --release --target aarch64-apple-darwin
-cd target/aarch64-apple-darwin/release
-tar -czf git-dash-v0.1.0-aarch64-apple-darwin.tar.gz git-dash
-shasum -a 256 git-dash-v0.1.0-aarch64-apple-darwin.tar.gz
-```
-
-### Option 3: Cross-Compilation (Advanced)
-
-Install cross-compilation tools:
-```sh
-rustup target add x86_64-apple-darwin
-rustup target add aarch64-apple-darwin
-```
-
-Then build both:
-```sh
-cargo build --release --target x86_64-apple-darwin
 cargo build --release --target aarch64-apple-darwin
 ```
-
-### Option 4: GitHub Actions (Recommended - TODO)
-
-Create `.github/workflows/release.yml` to automate builds on tag push.
-
-## Creating the GitHub Release
-
-1. **Create and push a tag:**
-   ```sh
-   git tag -a v0.1.0 -m "Release v0.1.0"
-   git push origin v0.1.0
-   ```
-
-2. **Create release on GitHub:**
-   - Go to https://github.com/jvm/git-dash/releases/new
-   - Select tag: `v0.1.0`
-   - Release title: `v0.1.0`
-   - Description: Release notes
-   - Upload both `.tar.gz` files
-
-3. **Note the SHA256 checksums** from the build output
-
-## Updating Homebrew Tap
-
-The Homebrew formula lives in a separate repository: https://github.com/jvm/homebrew-tap
-
-1. **Clone or update the tap repository:**
-   ```sh
-   git clone https://github.com/jvm/homebrew-tap.git
-   cd homebrew-tap
-   ```
-
-2. **Update the formula** (`Formula/git-dash.rb`):
-   - Update `version` line
-   - Update URLs with new version number
-   - Replace SHA256 checksums with actual values from the build output
-
-3. **Commit and push:**
-   ```sh
-   git add Formula/git-dash.rb
-   git commit -m "Update git-dash to v0.1.0"
-   git push
-   ```
-
-See the tap repository for formula maintenance and documentation.
 
 ## Testing the Release
 
 ```sh
-# Test Homebrew installation
 brew uninstall git-dash  # if already installed
 brew update
 brew install jvm/tap/git-dash
-
-# Verify version
 git-dash --help
-
-# Test basic functionality
 git-dash ~/repos
-```
-
-## Publishing to crates.io (Optional)
-
-```sh
-# Dry run first
-cargo publish --dry-run
-
-# Publish
-cargo publish
 ```
 
 ## Post-Release
@@ -129,6 +90,17 @@ cargo publish
 - [ ] Update documentation if needed
 - [ ] Close related issues
 - [ ] Update roadmap
+
+## Troubleshooting
+
+**Release assets 404 in the tap workflow:**
+- Ensure the GitHub release exists before triggering the workflow.
+
+**Homebrew PR already exists:**
+- The workflow will force-update the branch; just review and merge.
+
+**Cross-compile failures with Homebrew Rust:**
+- Prefer rustup: `rustup run 1.92.0 cargo build --release --target x86_64-apple-darwin`
 
 ## Example Release Notes Template
 

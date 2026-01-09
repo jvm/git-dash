@@ -183,6 +183,34 @@ Pull requests should include:
 - Screenshots or terminal captures for UI changes
 - Confirmation that pre-commit checklist passed
 
+## Release Process
+
+Use `RELEASE.md` as the source of truth. The high-level flow:
+
+1. Bump `Cargo.toml` version and update `Cargo.lock`.
+2. Run `just check`.
+3. Build release artifacts (`just build-release VERSION=x.y.z`).
+4. Create and push tag (`vX.Y.Z`).
+5. Create a GitHub release and upload the tarballs.
+6. Trigger the Homebrew tap workflow and merge the PR.
+7. Publish to crates.io.
+8. Remove local release artifacts.
+
+### Release Prerequisites
+
+- Authenticated GitHub CLI (`gh auth status`).
+- `cargo login` with a verified crates.io email.
+- Rust targets installed for macOS releases:
+  - `rustup target add x86_64-apple-darwin`
+  - `rustup target add aarch64-apple-darwin`
+
+### Toolchain Note
+
+If Homebrew `cargo`/`rustc` are ahead in `PATH`, prefer rustup for release builds:
+```sh
+rustup run 1.92.0 cargo build --release --target x86_64-apple-darwin
+```
+
 ## Security & Configuration Notes
 
 This tool is local-first. Do not introduce telemetry or network access beyond invoking Git. Configuration is currently out of scope; if you add it later, document defaults and safe handling of paths and credentials.
