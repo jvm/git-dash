@@ -108,16 +108,19 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     // Calculate repository statistics
     let total_repos = app.repos.len();
     let dirty_count = app.repos.iter().filter(|r| r.dirty).count();
-    let ahead_count = app
-        .repos
-        .iter()
-        .filter(|r| r.ahead_behind.contains('↑'))
-        .count();
-    let behind_count = app
-        .repos
-        .iter()
-        .filter(|r| r.ahead_behind.contains('↓'))
-        .count();
+    let (ahead_count, behind_count) =
+        app.repos
+            .iter()
+            .fold((0, 0), |(ahead_total, behind_total), repo| {
+                if let Some((ahead, behind)) = parse_ahead_behind(&repo.ahead_behind) {
+                    (
+                        ahead_total + usize::from(ahead > 0),
+                        behind_total + usize::from(behind > 0),
+                    )
+                } else {
+                    (ahead_total, behind_total)
+                }
+            });
 
     let title = if !app.loading && total_repos > 0 {
         format!(
@@ -167,19 +170,21 @@ fn build_table(repos: &[RepoState]) -> Table<'_> {
         };
 
         // Color-code ahead/behind based on status
-        let ahead_behind_style = if repo.ahead_behind == "-" {
-            Style::default().fg(Color::DarkGray)
-        } else if repo.ahead_behind.contains('↑') && repo.ahead_behind.contains('↓') {
-            // Diverged - both ahead and behind
-            Style::default().fg(Color::Red)
-        } else if repo.ahead_behind.contains('↑') {
-            // Only ahead
-            Style::default().fg(Color::Green)
-        } else if repo.ahead_behind.contains('↓') {
-            // Only behind
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
+        let ahead_behind_style = match parse_ahead_behind(&repo.ahead_behind) {
+            Some((0, 0)) => Style::default().fg(Color::DarkGray),
+            Some((ahead, behind)) if ahead > 0 && behind > 0 => {
+                // Diverged - both ahead and behind
+                Style::default().fg(Color::Red)
+            }
+            Some((ahead, _)) if ahead > 0 => {
+                // Only ahead
+                Style::default().fg(Color::Green)
+            }
+            Some((_, behind)) if behind > 0 => {
+                // Only behind
+                Style::default().fg(Color::Yellow)
+            }
+            _ => Style::default().fg(Color::DarkGray),
         };
 
         // Show error message in the changes column if present
@@ -305,6 +310,18 @@ fn colorize_change_summary(change_summary: &str) -> Line<'static> {
     }
 
     Line::from(spans)
+}
+
+fn parse_ahead_behind(value: &str) -> Option<(u32, u32)> {
+    if value == "-" {
+        return None;
+    }
+
+    let (ahead_part, behind_part) = value.split_once('/')?;
+    let ahead = ahead_part.strip_prefix('+')?.parse::<u32>().ok()?;
+    let behind = behind_part.strip_prefix('-')?.parse::<u32>().ok()?;
+
+    Some((ahead, behind))
 }
 
 fn get_staleness_style(last_fetch: &str) -> Style {

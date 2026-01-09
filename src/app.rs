@@ -216,8 +216,8 @@ impl App {
             SortOrder::AheadBehind => {
                 // Repos with changes first (ahead or behind), then by name
                 self.repos.sort_by(|a, b| {
-                    let a_has_changes = a.ahead_behind != "-";
-                    let b_has_changes = b.ahead_behind != "-";
+                    let a_has_changes = has_ahead_or_behind(&a.ahead_behind);
+                    let b_has_changes = has_ahead_or_behind(&b.ahead_behind);
                     b_has_changes
                         .cmp(&a_has_changes)
                         .then_with(|| a.name.cmp(&b.name))
@@ -301,4 +301,23 @@ impl App {
             self.table_state.select(Some(0));
         }
     }
+}
+
+fn has_ahead_or_behind(value: &str) -> bool {
+    if value == "-" {
+        return false;
+    }
+
+    let Some((ahead_part, behind_part)) = value.split_once('/') else {
+        return false;
+    };
+
+    let Ok(ahead) = ahead_part.trim_start_matches('+').parse::<u32>() else {
+        return false;
+    };
+    let Ok(behind) = behind_part.trim_start_matches('-').parse::<u32>() else {
+        return false;
+    };
+
+    ahead > 0 || behind > 0
 }
