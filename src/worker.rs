@@ -92,53 +92,89 @@ pub fn spawn_worker(
 }
 
 fn fetch_status_parallel(repos: Vec<RepoRef>, evt_tx: &Sender<WorkerEvent>) -> Vec<RepoState> {
+    use std::sync::mpsc::channel;
     use std::sync::{Arc, Mutex};
 
     let total_repos = repos.len().max(1);
     let states = Arc::new(Mutex::new(Vec::with_capacity(repos.len())));
     let completed = Arc::new(Mutex::new(0usize));
 
+    // Determine worker count: use available parallelism, cap at 16 to avoid overwhelming the system
+    let worker_count = thread::available_parallelism()
+        .map(|n| n.get().min(16))
+        .unwrap_or(4);
+
+    log_debug(&format!(
+        "Fetching status for {} repos using {} workers",
+        repos.len(),
+        worker_count
+    ));
+
     // Use scoped threads to avoid 'static lifetime requirements
     thread::scope(|scope| {
-        let mut handles = Vec::new();
+        // Create work queue channel
+        let (work_tx, work_rx) = channel();
+        let work_rx = Arc::new(Mutex::new(work_rx));
 
+        // Send all work items to the queue
         for (idx, repo) in repos.into_iter().enumerate() {
+            let _ = work_tx.send((idx, repo));
+        }
+        drop(work_tx); // Close the channel after sending all work
+
+        // Spawn worker threads
+        let mut handles = Vec::new();
+        for _ in 0..worker_count {
+            let work_rx = Arc::clone(&work_rx);
             let states = Arc::clone(&states);
             let completed = Arc::clone(&completed);
             let evt_tx = evt_tx.clone();
 
             let handle = scope.spawn(move || {
-                let status_start = Instant::now();
-                let state = match git_status(&repo.path, &repo.git_dir) {
-                    Ok(status) => {
-                        log_debug(&format!(
-                            "Status OK repo={} elapsed_ms={}",
-                            repo.path.display(),
-                            status_start.elapsed().as_millis()
-                        ));
-                        status
-                    }
-                    Err(err) => {
-                        log_debug(&format!(
-                            "Status ERR repo={} elapsed_ms={} error={}",
-                            repo.path.display(),
-                            status_start.elapsed().as_millis(),
-                            err
-                        ));
-                        error_repo_state(&repo, &err)
-                    }
-                };
+                loop {
+                    // Get next work item
+                    let work_item = {
+                        let rx = work_rx.lock().unwrap();
+                        rx.recv()
+                    };
 
-                states.lock().unwrap().push((idx, state));
+                    let (idx, repo) = match work_item {
+                        Ok(item) => item,
+                        Err(_) => break, // Channel closed, no more work
+                    };
 
-                let count = {
-                    let mut c = completed.lock().unwrap();
-                    *c += 1;
-                    *c
-                };
+                    let status_start = Instant::now();
+                    let state = match git_status(&repo.path, &repo.git_dir) {
+                        Ok(status) => {
+                            log_debug(&format!(
+                                "Status OK repo={} elapsed_ms={}",
+                                repo.path.display(),
+                                status_start.elapsed().as_millis()
+                            ));
+                            status
+                        }
+                        Err(err) => {
+                            log_debug(&format!(
+                                "Status ERR repo={} elapsed_ms={} error={}",
+                                repo.path.display(),
+                                status_start.elapsed().as_millis(),
+                                err
+                            ));
+                            error_repo_state(&repo, &err)
+                        }
+                    };
 
-                let ratio = 0.4 + count as f64 / total_repos as f64 * 0.6;
-                let _ = evt_tx.send(WorkerEvent::ScanProgress { ratio });
+                    states.lock().unwrap().push((idx, state));
+
+                    let count = {
+                        let mut c = completed.lock().unwrap();
+                        *c += 1;
+                        *c
+                    };
+
+                    let ratio = 0.4 + count as f64 / total_repos as f64 * 0.6;
+                    let _ = evt_tx.send(WorkerEvent::ScanProgress { ratio });
+                }
             });
 
             handles.push(handle);

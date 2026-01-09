@@ -19,6 +19,7 @@ use crossterm::terminal::{
 use ratatui::prelude::*;
 
 use app::App;
+use git::friendly_error;
 use logger::{init_logger, log_debug};
 use status::git_status;
 use ui::render_ui;
@@ -199,7 +200,10 @@ fn drain_worker_events(app: &mut App, evt_rx: &mpsc::Receiver<WorkerEvent>) {
                 };
                 match result {
                     Ok(message) => app.set_status(format!("{action_label} OK: {message}")),
-                    Err(message) => app.set_status(format!("{action_label} failed: {message}")),
+                    Err(message) => {
+                        let friendly_msg = friendly_error(&message);
+                        app.set_status(format!("{action_label} failed: {friendly_msg}"))
+                    }
                 }
                 if let Some(repo) = app.repos.iter_mut().find(|repo| repo.path == path) {
                     if let Ok(status) = git_status(&path, &repo.git_dir) {
