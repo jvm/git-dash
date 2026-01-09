@@ -18,12 +18,15 @@ jobs:
     steps:
       - name: Determine version
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            tag="${{ github.event.release.tag_name }}"
-            version="${tag#v}"
+          if [ "$EVENT_NAME" = "release" ]; then
+            version="${RELEASE_TAG#v}"
           else
-            version="${{ inputs.version }}"
+            version="$INPUT_VERSION"
           fi
 
           if [ -z "$version" ]; then
