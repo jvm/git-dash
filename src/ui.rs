@@ -1,5 +1,6 @@
 use ratatui::layout::Alignment;
 use ratatui::prelude::*;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Clear, Gauge, Paragraph, Row, Table, Wrap};
 
 use crate::app::App;
@@ -182,17 +183,10 @@ fn build_table(repos: &[RepoState]) -> Table<'_> {
         };
 
         // Show error message in the changes column if present
-        let (change_display, has_error) = if let Some(err) = &repo.error_message {
-            (format!("⚠ {}", err), true)
+        let change_cell = if let Some(err) = &repo.error_message {
+            Cell::from(format!("⚠ {}", err)).style(Style::default().fg(Color::Red))
         } else {
-            (repo.change_summary.clone(), false)
-        };
-
-        // Style the change column - red if error, default otherwise
-        let change_style = if has_error {
-            Style::default().fg(Color::Red)
-        } else {
-            Style::default()
+            Cell::from(colorize_change_summary(&repo.change_summary))
         };
 
         // Color-code last fetch by staleness
@@ -203,7 +197,7 @@ fn build_table(repos: &[RepoState]) -> Table<'_> {
             Cell::from(repo.branch.clone()),
             Cell::from(dirty).style(dirty_style),
             Cell::from(repo.ahead_behind.clone()).style(ahead_behind_style),
-            Cell::from(change_display).style(change_style),
+            change_cell,
             Cell::from(repo.remote_url.clone()),
             Cell::from(repo.last_fetch.clone()).style(fetch_style),
         ])
@@ -274,6 +268,43 @@ fn render_no_results_state(frame: &mut Frame, area: Rect, query: &str) {
         .alignment(Alignment::Center);
 
     frame.render_widget(paragraph, area);
+}
+
+fn colorize_change_summary(change_summary: &str) -> Line<'static> {
+    if change_summary == "-" || change_summary.is_empty() {
+        return Line::from(Span::styled("-", Style::default().fg(Color::DarkGray)));
+    }
+
+    let mut spans = Vec::new();
+    let parts: Vec<&str> = change_summary.split_whitespace().collect();
+
+    for (idx, part) in parts.iter().enumerate() {
+        // Each part is like "M:3" or "D:1" or "??:2"
+        if let Some(colon_pos) = part.find(':') {
+            let change_type = &part[..colon_pos];
+            let color = match change_type {
+                "M" => Color::Yellow,  // Modified
+                "D" => Color::Red,     // Deleted
+                "A" => Color::Green,   // Added
+                "??" => Color::Cyan,   // Untracked
+                "R" => Color::Magenta, // Renamed
+                "C" => Color::Blue,    // Copied
+                _ => Color::White,     // Unknown
+            };
+
+            spans.push(Span::styled(part.to_string(), Style::default().fg(color)));
+        } else {
+            // Fallback for malformed parts
+            spans.push(Span::raw(part.to_string()));
+        }
+
+        // Add space separator between parts (but not after the last one)
+        if idx < parts.len() - 1 {
+            spans.push(Span::raw(" "));
+        }
+    }
+
+    Line::from(spans)
 }
 
 fn get_staleness_style(last_fetch: &str) -> Style {
