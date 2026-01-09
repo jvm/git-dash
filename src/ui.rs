@@ -17,10 +17,24 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
 
     render_header(frame, chunks[0], app);
 
-    let table = build_table(&app.repos);
+    // Get filtered repos and their count before borrowing table_state mutably
+    let filtered_repos = app.filtered_repos();
+    let filtered_count = filtered_repos.len();
+    let total_count = app.repos.len();
+    let search_query = app.search_query.clone();
+    let status_line = app.status_line.clone();
+
+    let table = build_table(&filtered_repos);
     frame.render_stateful_widget(table, chunks[1], &mut app.table_state);
 
-    let footer_text = if let Some(action) = &app.confirmation {
+    let footer_text = if app.search_mode {
+        format!("Search: {}_", app.search_query)
+    } else if !search_query.is_empty() {
+        format!(
+            "Filtered: {}/{} repos matching \"{}\" | {}",
+            filtered_count, total_count, search_query, status_line
+        )
+    } else if let Some(action) = &app.confirmation {
         let label = match action {
             Action::Pull => "Pull",
             Action::Push => "Push",
@@ -33,7 +47,7 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
     };
 
     let footer = Block::default()
-        .title("q quit | r refresh | p pull | u push | ? help")
+        .title("q quit | r refresh | p pull | u push | / search | ? help")
         .borders(Borders::ALL);
     let footer_paragraph = ratatui::widgets::Paragraph::new(footer_text)
         .block(footer)
@@ -184,6 +198,8 @@ fn render_help_overlay(frame: &mut Frame) {
         "  r              Refresh repository status",
         "",
         "VIEW",
+        "  /              Search/filter repositories by name",
+        "  Esc            Clear search filter",
         "  ?              Toggle this help screen",
         "",
         "OTHER",

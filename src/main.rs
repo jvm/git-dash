@@ -141,6 +141,12 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
         return;
     }
 
+    // Search mode takes priority
+    if app.search_mode {
+        handle_search_key(app, key);
+        return;
+    }
+
     if app.confirmation.is_some() {
         handle_confirm_key(app, key);
         return;
@@ -152,6 +158,8 @@ fn handle_key_event(app: &mut App, key: KeyEvent) {
         KeyCode::Char('p') => app.request_confirm(Action::Pull),
         KeyCode::Char('u') => app.request_confirm(Action::Push),
         KeyCode::Char('?') => app.toggle_help(),
+        KeyCode::Char('/') => app.enter_search_mode(),
+        KeyCode::Esc => app.exit_search_mode(),
         KeyCode::Down | KeyCode::Char('j') => app.next(),
         KeyCode::Up | KeyCode::Char('k') => app.previous(),
         KeyCode::PageDown => app.page_down(),
@@ -175,6 +183,17 @@ fn handle_confirm_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') | KeyCode::Esc => {
             app.set_status("Action canceled".to_string());
             app.confirmation = None;
+        }
+        _ => {}
+    }
+}
+
+fn handle_search_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Char(c) => app.search_push_char(c),
+        KeyCode::Backspace => app.search_pop_char(),
+        KeyCode::Enter | KeyCode::Esc => {
+            app.search_mode = false;
         }
         _ => {}
     }

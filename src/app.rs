@@ -18,6 +18,8 @@ pub struct App {
     pub confirmation: Option<Action>,
     pub should_quit: bool,
     pub help_visible: bool,
+    pub search_mode: bool,
+    pub search_query: String,
 }
 
 impl App {
@@ -35,6 +37,8 @@ impl App {
             confirmation: None,
             should_quit: false,
             help_visible: false,
+            search_mode: false,
+            search_query: String::new(),
         }
     }
 
@@ -90,7 +94,7 @@ impl App {
     }
 
     pub fn next(&mut self) {
-        let len = self.repos.len();
+        let len = self.filtered_repos().len();
         if len == 0 {
             return;
         }
@@ -102,7 +106,7 @@ impl App {
     }
 
     pub fn previous(&mut self) {
-        let len = self.repos.len();
+        let len = self.filtered_repos().len();
         if len == 0 {
             return;
         }
@@ -120,7 +124,7 @@ impl App {
     }
 
     pub fn page_down(&mut self) {
-        let len = self.repos.len();
+        let len = self.filtered_repos().len();
         if len == 0 {
             return;
         }
@@ -132,7 +136,7 @@ impl App {
     }
 
     pub fn page_up(&mut self) {
-        let len = self.repos.len();
+        let len = self.filtered_repos().len();
         if len == 0 {
             return;
         }
@@ -144,20 +148,25 @@ impl App {
     }
 
     pub fn jump_to_first(&mut self) {
-        if !self.repos.is_empty() {
+        if !self.filtered_repos().is_empty() {
             self.table_state.select(Some(0));
         }
     }
 
     pub fn jump_to_last(&mut self) {
-        let len = self.repos.len();
+        let len = self.filtered_repos().len();
         if len > 0 {
             self.table_state.select(Some(len - 1));
         }
     }
 
     pub fn selected_repo(&self) -> Option<&RepoState> {
-        self.table_state.selected().and_then(|i| self.repos.get(i))
+        let filtered = self.filtered_repos();
+        self.table_state.selected().and_then(|i| {
+            filtered
+                .get(i)
+                .and_then(|r| self.repos.iter().find(|repo| repo.path == r.path))
+        })
     }
 
     pub fn set_status(&mut self, status: String) {
@@ -175,5 +184,46 @@ impl App {
 
     pub fn toggle_help(&mut self) {
         self.help_visible = !self.help_visible;
+    }
+
+    pub fn filtered_repos(&self) -> Vec<RepoState> {
+        if self.search_query.is_empty() {
+            self.repos.clone()
+        } else {
+            let query_lower = self.search_query.to_lowercase();
+            self.repos
+                .iter()
+                .filter(|repo| repo.name.to_lowercase().contains(&query_lower))
+                .cloned()
+                .collect()
+        }
+    }
+
+    pub fn enter_search_mode(&mut self) {
+        self.search_mode = true;
+        self.search_query.clear();
+    }
+
+    pub fn exit_search_mode(&mut self) {
+        self.search_mode = false;
+        self.search_query.clear();
+        // Reset selection to first repo
+        if !self.repos.is_empty() {
+            self.table_state.select(Some(0));
+        }
+    }
+
+    pub fn search_push_char(&mut self, c: char) {
+        self.search_query.push(c);
+        // Reset selection when search changes
+        self.table_state.select(Some(0));
+    }
+
+    pub fn search_pop_char(&mut self) {
+        self.search_query.pop();
+        // Reset selection when search changes
+        if !self.repos.is_empty() {
+            self.table_state.select(Some(0));
+        }
     }
 }
