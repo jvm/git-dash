@@ -106,25 +106,25 @@ jobs:
           )
           text = replace_once(
               r'(url "https://github.com/jvm/git-dash/releases/download/v)[^/]+(/git-dash-v)[^/]+(-aarch64-apple-darwin\.tar\.gz")',
-              rf"\1{version}\2{version}\3",
+              lambda m: f"{m.group(1)}{version}{m.group(2)}{version}{m.group(3)}",
               text,
               "arm url",
           )
           text = replace_once(
               r'(url "https://github.com/jvm/git-dash/releases/download/v)[^/]+(/git-dash-v)[^/]+(-x86_64-apple-darwin\.tar\.gz")',
-              rf"\1{version}\2{version}\3",
+              lambda m: f"{m.group(1)}{version}{m.group(2)}{version}{m.group(3)}",
               text,
               "intel url",
           )
           text = replace_once(
               r'(aarch64-apple-darwin\.tar\.gz"\n\s+sha256 ")[^"]+(")',
-              rf"\1{arm_sha}\2",
+              lambda m: f"{m.group(1)}{arm_sha}{m.group(2)}",
               text,
               "arm sha",
           )
           text = replace_once(
               r'(x86_64-apple-darwin\.tar\.gz"\n\s+sha256 ")[^"]+(")',
-              rf"\1{intel_sha}\2",
+              lambda m: f"{m.group(1)}{intel_sha}{m.group(2)}",
               text,
               "intel sha",
           )
