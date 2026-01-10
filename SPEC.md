@@ -265,16 +265,13 @@ Located in `tests/repo_discovery.rs`:
 - ✅ Homebrew tap support (personal tap: jvm/tap)
 
 ### v0.2 (Planned)
-- Batch operations (multi-select repositories)
-- Filtering and sorting options
-- Customizable column visibility
-- Watch mode for auto-refresh
-
-### v0.3 (Planned)
-- Config file support (.git-dashrc)
-- Custom ignore patterns
-- Pluggable status providers
-- Fetch before status option
+- Search and filter repositories
+- Sorting options (name/status/ahead-behind/last fetch)
+- Help screen with keybindings
+- Header stats (repo/dirty/ahead/behind counts)
+- Empty state handling
+- Colorized change summary display
+- Scroll hints for long lists
 
 ---
 
@@ -295,4 +292,3 @@ Located in `tests/repo_discovery.rs`:
 ### Path Handling
 - **Decision**: Support paths with spaces in porcelain parsing
 - **Rationale**: Modern projects often have spaces in filenames
-
