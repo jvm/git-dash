@@ -9,7 +9,7 @@ pub struct RepoRef {
 
 pub fn discover_repos_with_progress<F>(root: &Path, mut on_progress: F) -> Vec<RepoRef>
 where
-    F: FnMut(usize, usize),
+    F: FnMut(usize, usize) -> bool,
 {
     let mut repos = Vec::new();
     let mut stack = vec![root.to_path_buf()];
@@ -50,8 +50,8 @@ where
             stack.push(subdir);
         }
 
-        if visited.is_multiple_of(20) || stack.is_empty() {
-            on_progress(visited, stack.len());
+        if (visited.is_multiple_of(20) || stack.is_empty()) && !on_progress(visited, stack.len()) {
+            return repos;
         }
     }
 

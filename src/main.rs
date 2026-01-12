@@ -56,7 +56,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     terminal.show_cursor()?;
 
     app.request_quit();
-    let _ = worker_handle.join();
+    if let Err(err) = worker_handle.join() {
+        eprintln!("worker thread panicked: {:?}", err);
+    }
 
     if let Err(err) = res {
         eprintln!("{err}");

@@ -1,8 +1,7 @@
 use std::fs;
 use std::process::Command;
 
-// We need to make the modules public or accessible for testing
-// For now, we'll write higher-level integration tests
+use git_dash::discovery::discover_repos_with_progress;
 
 #[test]
 fn test_discover_repos_in_temp_dir() {
@@ -39,13 +38,13 @@ fn test_discover_repos_in_temp_dir() {
     let non_repo = temp_dir.join("not-a-repo");
     fs::create_dir_all(&non_repo).unwrap();
 
-    // Test discovery using the binary (integration test approach)
-    // Since modules aren't exposed, we test the overall behavior
-    // For now, this test just validates the setup works
+    let repos = discover_repos_with_progress(&temp_dir, |_, _| true);
+    let repo_paths: Vec<_> = repos.iter().map(|repo| repo.path.clone()).collect();
 
-    assert!(repo1.join(".git").exists());
-    assert!(repo2.join(".git").exists());
-    assert!(!non_repo.join(".git").exists());
+    assert!(repo_paths.contains(&repo1));
+    assert!(repo_paths.contains(&repo2));
+    assert!(!repo_paths.contains(&non_repo));
+    assert_eq!(repo_paths.len(), 2);
 
     // Clean up
     let _ = fs::remove_dir_all(&temp_dir);
@@ -75,9 +74,11 @@ fn test_nested_repos_not_discovered() {
         .output()
         .unwrap();
 
-    // Both have .git, but discovery should stop at outer
-    assert!(temp_dir.join(".git").exists());
-    assert!(inner.join(".git").exists());
+    let repos = discover_repos_with_progress(&temp_dir, |_, _| true);
+    let repo_paths: Vec<_> = repos.iter().map(|repo| repo.path.clone()).collect();
+
+    assert_eq!(repo_paths, vec![temp_dir.clone()]);
+    assert!(!repo_paths.contains(&inner));
 
     // Clean up
     let _ = fs::remove_dir_all(&temp_dir);
@@ -94,26 +95,28 @@ fn test_gitdir_file_handling() {
 
     // Create main repo
     fs::create_dir_all(&temp_dir).unwrap();
+    let main_repo = temp_dir.join("main");
+    fs::create_dir_all(&main_repo).unwrap();
     Command::new("git")
         .args(["init"])
-        .current_dir(&temp_dir)
+        .current_dir(&main_repo)
         .output()
         .unwrap();
 
     // Create a commit so we can create a worktree
     Command::new("git")
         .args(["config", "user.email", "test@test.com"])
-        .current_dir(&temp_dir)
+        .current_dir(&main_repo)
         .output()
         .unwrap();
     Command::new("git")
         .args(["config", "user.name", "Test"])
-        .current_dir(&temp_dir)
+        .current_dir(&main_repo)
         .output()
         .unwrap();
     Command::new("git")
         .args(["commit", "--allow-empty", "-m", "initial"])
-        .current_dir(&temp_dir)
+        .current_dir(&main_repo)
         .output()
         .unwrap();
 
@@ -121,19 +124,32 @@ fn test_gitdir_file_handling() {
     let worktree = temp_dir.join("worktree");
     let output = Command::new("git")
         .args(["worktree", "add", worktree.to_str().unwrap(), "HEAD"])
-        .current_dir(&temp_dir)
+        .current_dir(&main_repo)
         .output()
         .unwrap();
 
-    if output.status.success() {
-        // Worktree should have a .git file (not directory)
-        let git_path = worktree.join(".git");
-        assert!(git_path.exists());
+    assert!(
+        output.status.success(),
+        "git worktree add failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
-        // It should be a file, not a directory
-        let metadata = fs::metadata(&git_path).unwrap();
-        assert!(metadata.is_file());
-    }
+    let repos = discover_repos_with_progress(&temp_dir, |_, _| true);
+    let repo_paths: Vec<_> = repos.iter().map(|repo| repo.path.clone()).collect();
+    assert!(repo_paths.contains(&main_repo));
+    assert!(repo_paths.contains(&worktree));
+
+    // Worktree should have a .git file (not directory)
+    let git_path = worktree.join(".git");
+    assert!(git_path.exists());
+
+    // It should be a file, not a directory
+    let metadata = fs::metadata(&git_path).unwrap();
+    assert!(metadata.is_file());
+
+    let worktree_repo = repos.iter().find(|repo| repo.path == worktree).unwrap();
+    assert!(worktree_repo.git_dir.is_dir());
+    assert_ne!(worktree_repo.git_dir, git_path);
 
     // Clean up
     let _ = fs::remove_dir_all(&temp_dir);

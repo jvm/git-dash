@@ -1,6 +1,6 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -119,7 +119,7 @@ pub fn run_git(path: &Path, args: &[&str], timeout: Duration) -> Result<Vec<u8>,
         buf
     });
 
-    if let Err(err) = wait_with_timeout(&mut child, timeout).map_err(|err| {
+    let status = match wait_with_timeout(&mut child, timeout).map_err(|err| {
         log_debug(&format!(
             "git timeout path={} args={:?} elapsed_ms={}",
             safe_path.display(),
@@ -128,14 +128,13 @@ pub fn run_git(path: &Path, args: &[&str], timeout: Duration) -> Result<Vec<u8>,
         ));
         format!("git {:?} {err}", args)
     }) {
-        let _ = out_handle.join();
-        let _ = err_handle.join();
-        return Err(err);
-    }
-
-    let status = child
-        .wait()
-        .map_err(|err| format!("git {:?} failed: {err}", args))?;
+        Ok(status) => status,
+        Err(err) => {
+            let _ = out_handle.join();
+            let _ = err_handle.join();
+            return Err(err);
+        }
+    };
     let stdout = out_handle.join().unwrap_or_default();
     let stderr = err_handle.join().unwrap_or_default();
 
@@ -158,11 +157,11 @@ pub fn run_git(path: &Path, args: &[&str], timeout: Duration) -> Result<Vec<u8>,
     }
 }
 
-fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<(), String> {
+fn wait_with_timeout(child: &mut Child, timeout: Duration) -> Result<ExitStatus, String> {
     let start = Instant::now();
     loop {
         match child.try_wait() {
-            Ok(Some(_status)) => return Ok(()),
+            Ok(Some(status)) => return Ok(status),
             Ok(None) => {
                 if start.elapsed() >= timeout {
                     let _ = child.kill();

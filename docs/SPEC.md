@@ -264,14 +264,17 @@ Located in `tests/repo_discovery.rs`:
 - ✅ Comprehensive test suite (17 tests)
 - ✅ Homebrew tap support (personal tap: jvm/tap)
 
-### v0.2 (Planned)
-- Search and filter repositories
-- Sorting options (name/status/ahead-behind/last fetch)
-- Help screen with keybindings
-- Header stats (repo/dirty/ahead/behind counts)
-- Empty state handling
-- Colorized change summary display
-- Scroll hints for long lists
+### v0.2 (Completed)
+- ✅ Search and filter repositories
+- ✅ Sorting options (name/status/ahead-behind/last fetch)
+- ✅ Help screen with keybindings
+- ✅ Header stats (repo/dirty/ahead/behind counts)
+- ✅ Empty state handling
+- ✅ Colorized change summary display
+- ✅ Scroll hints for long lists
+
+### v0.3 (Planned)
+- TBD
 
 ---
 

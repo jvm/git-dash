@@ -63,6 +63,14 @@ Required components:
 
 All code must meet these quality standards before commit:
 
+**When any code changes are made**, always run the full quality gate sequence before handing off:
+```sh
+cargo fmt
+cargo clippy --all-targets --all-features
+cargo test
+cargo build --release
+```
+
 ### 1. Formatting
 ```sh
 cargo fmt

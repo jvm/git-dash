@@ -5,7 +5,7 @@ use std::time::Instant;
 use ratatui::widgets::TableState;
 
 use crate::discovery::RepoRef;
-use crate::status::RepoState;
+use crate::status::{parse_ahead_behind, RepoState, NO_REMOTE};
 use crate::worker::{Action, WorkerCmd};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -17,11 +17,9 @@ pub enum SortOrder {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-#[allow(dead_code)]
 pub enum StatusType {
     Success,
     Error,
-    Warning,
     Info,
 }
 
@@ -69,9 +67,12 @@ impl App {
     pub fn request_scan(&mut self) {
         self.loading = true;
         self.scan_progress = 0.0;
-        let _ = self.cmd_tx.send(WorkerCmd::Scan {
+        if let Err(err) = self.cmd_tx.send(WorkerCmd::Scan {
             root: self.root.clone(),
-        });
+        }) {
+            self.loading = false;
+            self.set_status(format!("Worker unavailable: {err}"));
+        }
     }
 
     pub fn request_refresh(&mut self) {
@@ -83,7 +84,9 @@ impl App {
                 git_dir: repo.git_dir.clone(),
             })
             .collect();
-        let _ = self.cmd_tx.send(WorkerCmd::Refresh { repos });
+        if let Err(err) = self.cmd_tx.send(WorkerCmd::Refresh { repos }) {
+            self.set_status(format!("Worker unavailable: {err}"));
+        }
     }
 
     pub fn request_confirm(&mut self, action: Action) {
@@ -94,7 +97,7 @@ impl App {
 
         // Validate that we have a remote before allowing push/pull
         if let Some(repo) = self.selected_repo() {
-            if repo.remote_url == "-" {
+            if repo.remote_url == NO_REMOTE {
                 self.set_status("No remote configured for this repository".to_string());
                 return;
             }
@@ -105,20 +108,25 @@ impl App {
 
     pub fn perform_action(&mut self, action: Action) {
         if let Some(repo) = self.selected_repo() {
-            let _ = self.cmd_tx.send(WorkerCmd::Action {
+            if let Err(err) = self.cmd_tx.send(WorkerCmd::Action {
                 path: repo.path.clone(),
                 action,
-            });
-            self.set_status("Running action...".to_string());
+            }) {
+                self.set_status(format!("Worker unavailable: {err}"));
+            } else {
+                self.set_status("Running action...".to_string());
+            }
         }
     }
 
     pub fn request_quit(&mut self) {
-        let _ = self.cmd_tx.send(WorkerCmd::Quit);
+        if let Err(err) = self.cmd_tx.send(WorkerCmd::Quit) {
+            self.set_status(format!("Worker unavailable: {err}"));
+        }
     }
 
     pub fn next(&mut self) {
-        let len = self.filtered_repos().len();
+        let len = self.filtered_indices().len();
         if len == 0 {
             return;
         }
@@ -130,7 +138,7 @@ impl App {
     }
 
     pub fn previous(&mut self) {
-        let len = self.filtered_repos().len();
+        let len = self.filtered_indices().len();
         if len == 0 {
             return;
         }
@@ -148,7 +156,7 @@ impl App {
     }
 
     pub fn page_down(&mut self) {
-        let len = self.filtered_repos().len();
+        let len = self.filtered_indices().len();
         if len == 0 {
             return;
         }
@@ -160,7 +168,7 @@ impl App {
     }
 
     pub fn page_up(&mut self) {
-        let len = self.filtered_repos().len();
+        let len = self.filtered_indices().len();
         if len == 0 {
             return;
         }
@@ -172,25 +180,24 @@ impl App {
     }
 
     pub fn jump_to_first(&mut self) {
-        if !self.filtered_repos().is_empty() {
+        if !self.filtered_indices().is_empty() {
             self.table_state.select(Some(0));
         }
     }
 
     pub fn jump_to_last(&mut self) {
-        let len = self.filtered_repos().len();
+        let len = self.filtered_indices().len();
         if len > 0 {
             self.table_state.select(Some(len - 1));
         }
     }
 
     pub fn selected_repo(&self) -> Option<&RepoState> {
-        let filtered = self.filtered_repos();
-        self.table_state.selected().and_then(|i| {
-            filtered
-                .get(i)
-                .and_then(|r| self.repos.iter().find(|repo| repo.path == r.path))
-        })
+        let indices = self.filtered_indices();
+        self.table_state
+            .selected()
+            .and_then(|i| indices.get(i).copied())
+            .and_then(|repo_idx| self.repos.get(repo_idx))
     }
 
     pub fn set_status(&mut self, status: String) {
@@ -261,17 +268,18 @@ impl App {
         self.help_visible = !self.help_visible;
     }
 
-    pub fn filtered_repos(&self) -> Vec<RepoState> {
+    pub fn filtered_indices(&self) -> Vec<usize> {
         if self.search_query.is_empty() {
-            self.repos.clone()
-        } else {
-            let query_lower = self.search_query.to_lowercase();
-            self.repos
-                .iter()
-                .filter(|repo| repo.name.to_lowercase().contains(&query_lower))
-                .cloned()
-                .collect()
+            return (0..self.repos.len()).collect();
         }
+
+        let query_lower = self.search_query.to_lowercase();
+        self.repos
+            .iter()
+            .enumerate()
+            .filter(|(_, repo)| repo.name.to_lowercase().contains(&query_lower))
+            .map(|(idx, _)| idx)
+            .collect()
     }
 
     pub fn enter_search_mode(&mut self) {
@@ -304,20 +312,8 @@ impl App {
 }
 
 fn has_ahead_or_behind(value: &str) -> bool {
-    if value == "-" {
-        return false;
+    match parse_ahead_behind(value) {
+        Some((ahead, behind)) => ahead > 0 || behind > 0,
+        None => false,
     }
-
-    let Some((ahead_part, behind_part)) = value.split_once('/') else {
-        return false;
-    };
-
-    let Ok(ahead) = ahead_part.trim_start_matches('+').parse::<u32>() else {
-        return false;
-    };
-    let Ok(behind) = behind_part.trim_start_matches('-').parse::<u32>() else {
-        return false;
-    };
-
-    ahead > 0 || behind > 0
 }

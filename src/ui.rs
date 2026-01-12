@@ -6,8 +6,34 @@ use ratatui::widgets::{
 };
 
 use crate::app::App;
-use crate::status::RepoState;
+use crate::status::{parse_ahead_behind, RepoState, NO_CHANGES, NO_LAST_FETCH};
 use crate::worker::Action;
+
+const HELP_TEXT: &[&str] = &[
+    "NAVIGATION",
+    "  j / ↓          Move selection down",
+    "  k / ↑          Move selection up",
+    "  PgDn           Page down",
+    "  PgUp           Page up",
+    "  g / Home       Jump to first repository",
+    "  G / End        Jump to last repository",
+    "",
+    "ACTIONS",
+    "  p              Pull (with confirmation)",
+    "  u              Push (with confirmation)",
+    "  r              Refresh repository status",
+    "",
+    "VIEW",
+    "  s              Cycle sort order (Name → Status → Ahead/Behind → Last Fetch)",
+    "  /              Search/filter repositories by name",
+    "  Esc            Clear search filter",
+    "  ?              Toggle this help screen",
+    "",
+    "OTHER",
+    "  q / Ctrl+C     Quit git-dash",
+    "  y              Confirm action",
+    "  n / Esc        Cancel action",
+];
 
 pub fn render_ui(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::default()
@@ -22,8 +48,8 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
     render_header(frame, chunks[0], app);
 
     // Get filtered repos and their count before borrowing table_state mutably
-    let filtered_repos = app.filtered_repos();
-    let filtered_count = filtered_repos.len();
+    let filtered_indices = app.filtered_indices();
+    let filtered_count = filtered_indices.len();
     let total_count = app.repos.len();
     let search_query = app.search_query.clone();
     let status_line = app.status_line.clone();
@@ -34,7 +60,7 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
     } else if filtered_count == 0 && !search_query.is_empty() {
         render_no_results_state(frame, chunks[1], &search_query);
     } else {
-        let table = build_table(&filtered_repos);
+        let table = build_table(&app.repos, &filtered_indices);
         frame.render_stateful_widget(table, chunks[1], &mut app.table_state);
         render_scroll_hints(frame, chunks[1], filtered_count, &app.table_state);
     }
@@ -76,7 +102,6 @@ pub fn render_ui(frame: &mut Frame, app: &mut App) {
         let color = match app.status_type {
             crate::app::StatusType::Success => Color::Green,
             crate::app::StatusType::Error => Color::Red,
-            crate::app::StatusType::Warning => Color::Yellow,
             crate::app::StatusType::Info => Color::Reset,
         };
 
@@ -152,7 +177,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     }
 }
 
-fn build_table(repos: &[RepoState]) -> Table<'_> {
+fn build_table<'a>(repos: &'a [RepoState], indices: &'a [usize]) -> Table<'a> {
     let header = Row::new(vec![
         Cell::from("Repository"),
         Cell::from("Branch"),
@@ -164,52 +189,55 @@ fn build_table(repos: &[RepoState]) -> Table<'_> {
     ])
     .style(Style::default().add_modifier(Modifier::BOLD));
 
-    let rows = repos.iter().map(|repo| {
-        let dirty = if repo.dirty { "dirty *" } else { "clean ." };
-        let dirty_style = if repo.dirty {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default().fg(Color::Cyan)
-        };
-
-        // Color-code ahead/behind based on status
-        let ahead_behind_style = match parse_ahead_behind(&repo.ahead_behind) {
-            Some((0, 0)) => Style::default().fg(Color::DarkGray),
-            Some((ahead, behind)) if ahead > 0 && behind > 0 => {
-                // Diverged - both ahead and behind
-                Style::default().fg(Color::Red)
-            }
-            Some((ahead, _)) if ahead > 0 => {
-                // Only ahead
-                Style::default().fg(Color::Green)
-            }
-            Some((_, behind)) if behind > 0 => {
-                // Only behind
+    let rows = indices
+        .iter()
+        .filter_map(|idx| repos.get(*idx))
+        .map(|repo| {
+            let dirty = if repo.dirty { "dirty *" } else { "clean ." };
+            let dirty_style = if repo.dirty {
                 Style::default().fg(Color::Yellow)
-            }
-            _ => Style::default().fg(Color::DarkGray),
-        };
+            } else {
+                Style::default().fg(Color::Cyan)
+            };
 
-        // Show error message in the changes column if present
-        let change_cell = if let Some(err) = &repo.error_message {
-            Cell::from(format!("⚠ {}", err)).style(Style::default().fg(Color::Red))
-        } else {
-            Cell::from(colorize_change_summary(&repo.change_summary))
-        };
+            // Color-code ahead/behind based on status
+            let ahead_behind_style = match parse_ahead_behind(&repo.ahead_behind) {
+                Some((0, 0)) => Style::default().fg(Color::DarkGray),
+                Some((ahead, behind)) if ahead > 0 && behind > 0 => {
+                    // Diverged - both ahead and behind
+                    Style::default().fg(Color::Red)
+                }
+                Some((ahead, _)) if ahead > 0 => {
+                    // Only ahead
+                    Style::default().fg(Color::Green)
+                }
+                Some((_, behind)) if behind > 0 => {
+                    // Only behind
+                    Style::default().fg(Color::Yellow)
+                }
+                _ => Style::default().fg(Color::DarkGray),
+            };
 
-        // Color-code last fetch by staleness
-        let fetch_style = get_staleness_style(&repo.last_fetch);
+            // Show error message in the changes column if present
+            let change_cell = if let Some(err) = &repo.error_message {
+                Cell::from(format!("⚠ {}", err)).style(Style::default().fg(Color::Red))
+            } else {
+                Cell::from(colorize_change_summary(&repo.change_summary))
+            };
 
-        Row::new(vec![
-            Cell::from(repo.name.clone()),
-            Cell::from(repo.branch.clone()),
-            Cell::from(dirty).style(dirty_style),
-            Cell::from(repo.ahead_behind.clone()).style(ahead_behind_style),
-            change_cell,
-            Cell::from(repo.remote_url.clone()),
-            Cell::from(repo.last_fetch.clone()).style(fetch_style),
-        ])
-    });
+            // Color-code last fetch by staleness
+            let fetch_style = get_staleness_style(&repo.last_fetch);
+
+            Row::new(vec![
+                Cell::from(repo.name.clone()),
+                Cell::from(repo.branch.clone()),
+                Cell::from(dirty).style(dirty_style),
+                Cell::from(repo.ahead_behind.clone()).style(ahead_behind_style),
+                change_cell,
+                Cell::from(repo.remote_url.clone()),
+                Cell::from(repo.last_fetch.clone()).style(fetch_style),
+            ])
+        });
 
     Table::new(
         rows,
@@ -335,7 +363,7 @@ fn render_no_results_state(frame: &mut Frame, area: Rect, query: &str) {
 }
 
 fn colorize_change_summary(change_summary: &str) -> Line<'static> {
-    if change_summary == "-" || change_summary.is_empty() {
+    if change_summary == NO_CHANGES || change_summary.is_empty() {
         return Line::from(Span::styled("-", Style::default().fg(Color::DarkGray)));
     }
 
@@ -371,21 +399,9 @@ fn colorize_change_summary(change_summary: &str) -> Line<'static> {
     Line::from(spans)
 }
 
-fn parse_ahead_behind(value: &str) -> Option<(u32, u32)> {
-    if value == "-" {
-        return None;
-    }
-
-    let (ahead_part, behind_part) = value.split_once('/')?;
-    let ahead = ahead_part.strip_prefix('+')?.parse::<u32>().ok()?;
-    let behind = behind_part.strip_prefix('-')?.parse::<u32>().ok()?;
-
-    Some((ahead, behind))
-}
-
 fn get_staleness_style(last_fetch: &str) -> Style {
     // Parse the age from strings like "2d", "5h", "30m", etc.
-    if last_fetch == "-" {
+    if last_fetch == NO_LAST_FETCH {
         return Style::default().fg(Color::DarkGray);
     }
 
@@ -428,34 +444,7 @@ fn render_help_overlay(frame: &mut Frame) {
         height: popup_height,
     };
 
-    // Help text content
-    let help_text = vec![
-        "NAVIGATION",
-        "  j / ↓          Move selection down",
-        "  k / ↑          Move selection up",
-        "  PgDn           Page down",
-        "  PgUp           Page up",
-        "  g / Home       Jump to first repository",
-        "  G / End        Jump to last repository",
-        "",
-        "ACTIONS",
-        "  p              Pull (with confirmation)",
-        "  u              Push (with confirmation)",
-        "  r              Refresh repository status",
-        "",
-        "VIEW",
-        "  s              Cycle sort order (Name → Status → Ahead/Behind → Last Fetch)",
-        "  /              Search/filter repositories by name",
-        "  Esc            Clear search filter",
-        "  ?              Toggle this help screen",
-        "",
-        "OTHER",
-        "  q / Ctrl+C     Quit git-dash",
-        "  y              Confirm action",
-        "  n / Esc        Cancel action",
-    ];
-
-    let help_paragraph = Paragraph::new(help_text.join("\n"))
+    let help_paragraph = Paragraph::new(HELP_TEXT.join("\n"))
         .block(
             Block::default()
                 .title(" Help (press any key to close) ")

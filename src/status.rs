@@ -5,6 +5,13 @@ use std::time::{Duration, SystemTime};
 use crate::discovery::RepoRef;
 use crate::git::{run_git, GIT_STATUS_TIMEOUT};
 
+pub const NO_REMOTE: &str = "-";
+pub const NO_AHEAD_BEHIND: &str = "-";
+pub const NO_LAST_FETCH: &str = "-";
+pub const NO_CHANGES: &str = "-";
+pub const NO_BRANCH: &str = "-";
+pub const DETACHED_BRANCH: &str = "DETACHED";
+
 #[derive(Clone, Debug)]
 pub struct RepoState {
     pub path: PathBuf,
@@ -31,7 +38,7 @@ pub fn git_status(path: &Path, git_dir: &Path) -> Result<RepoState, String> {
     for line in stdout.lines() {
         if let Some(rest) = line.strip_prefix("# branch.head ") {
             branch = match rest {
-                "(detached)" | "HEAD" => "DETACHED".to_string(),
+                "(detached)" | "HEAD" => DETACHED_BRANCH.to_string(),
                 _ => rest.to_string(),
             };
         } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
@@ -71,7 +78,7 @@ pub fn git_status(path: &Path, git_dir: &Path) -> Result<RepoState, String> {
 
     let ahead_behind = match (ahead, behind) {
         (Some(a), Some(b)) => format!("+{a}/-{b}"),
-        _ => "-".to_string(),
+        _ => NO_AHEAD_BEHIND.to_string(),
     };
 
     let name = repo_name(path);
@@ -84,8 +91,8 @@ pub fn git_status(path: &Path, git_dir: &Path) -> Result<RepoState, String> {
         dirty,
         ahead_behind,
         change_summary: summarize_changes(&changes),
-        remote_url: git_remote_simple(path).unwrap_or_else(|_| "-".to_string()),
-        last_fetch: git_last_fetch(git_dir).unwrap_or_else(|_| "-".to_string()),
+        remote_url: git_remote_simple(path).unwrap_or_else(|_| NO_REMOTE.to_string()),
+        last_fetch: git_last_fetch(git_dir).unwrap_or_else(|_| NO_LAST_FETCH.to_string()),
         error_message: None,
     })
 }
@@ -116,7 +123,7 @@ fn short_status(status: &str) -> String {
 
 fn summarize_changes(changes: &[(String, String)]) -> String {
     if changes.is_empty() {
-        return "-".to_string();
+        return NO_CHANGES.to_string();
     }
     let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
     for (code, _) in changes {
@@ -156,6 +163,18 @@ fn format_age(age: Duration) -> String {
     format!("{days}d")
 }
 
+pub fn parse_ahead_behind(value: &str) -> Option<(u32, u32)> {
+    if value == NO_AHEAD_BEHIND {
+        return None;
+    }
+
+    let (ahead_part, behind_part) = value.split_once('/')?;
+    let ahead = ahead_part.strip_prefix('+')?.parse::<u32>().ok()?;
+    let behind = behind_part.strip_prefix('-')?.parse::<u32>().ok()?;
+
+    Some((ahead, behind))
+}
+
 pub fn error_repo_state(repo: &RepoRef, err: &str) -> RepoState {
     let change_summary = if err.contains("timed out") {
         "timeout".to_string()
@@ -166,12 +185,12 @@ pub fn error_repo_state(repo: &RepoRef, err: &str) -> RepoState {
         path: repo.path.clone(),
         git_dir: repo.git_dir.clone(),
         name: repo_name(&repo.path),
-        branch: "-".to_string(),
+        branch: NO_BRANCH.to_string(),
         dirty: true,
-        ahead_behind: "-".to_string(),
+        ahead_behind: NO_AHEAD_BEHIND.to_string(),
         change_summary,
-        remote_url: "-".to_string(),
-        last_fetch: git_last_fetch(&repo.git_dir).unwrap_or_else(|_| "-".to_string()),
+        remote_url: NO_REMOTE.to_string(),
+        last_fetch: git_last_fetch(&repo.git_dir).unwrap_or_else(|_| NO_LAST_FETCH.to_string()),
         error_message: Some(err.to_string()),
     }
 }
@@ -262,7 +281,7 @@ mod tests {
     #[test]
     fn test_summarize_changes_empty() {
         let changes = vec![];
-        assert_eq!(summarize_changes(&changes), "-");
+        assert_eq!(summarize_changes(&changes), NO_CHANGES);
     }
 
     #[test]

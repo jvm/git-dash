@@ -2,6 +2,7 @@
 name = "git-dash"
 version = "0.2.0"
 edition = "2021"
+rust-version = "1.92.0"
 authors = ["Jose Mocito"]
 license = "MIT"
 description = "A fast TUI dashboard for discovering and managing multiple Git repositories"

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
@@ -34,26 +36,46 @@ pub enum WorkerEvent {
     },
 }
 
+// Progress is split into discovery (40%) and status (60%) phases.
+const DISCOVERY_PROGRESS_WEIGHT: f64 = 0.4;
+const STATUS_PROGRESS_WEIGHT: f64 = 0.6;
+
 pub fn spawn_worker(
     cmd_rx: Receiver<WorkerCmd>,
     evt_tx: Sender<WorkerEvent>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        while let Ok(cmd) = cmd_rx.recv() {
+        'worker_loop: while let Ok(cmd) = cmd_rx.recv() {
             match cmd {
                 WorkerCmd::Scan { root } => {
                     log_debug(&format!("Scan start root={}", root.display()));
                     let scan_start = Instant::now();
                     let mut total_estimate = 0usize;
+                    let stop = Arc::new(AtomicBool::new(false));
+                    let stop_flag = Arc::clone(&stop);
                     let repos = discover_repos_with_progress(&root, |visited, remaining| {
+                        if stop_flag.load(Ordering::Relaxed) {
+                            return false;
+                        }
                         total_estimate = total_estimate.max(visited + remaining);
                         if total_estimate == 0 {
-                            return;
+                            return true;
                         }
                         let ratio = visited as f64 / total_estimate as f64;
-                        let scaled = (ratio * 0.4).min(0.4);
-                        let _ = evt_tx.send(WorkerEvent::ScanProgress { ratio: scaled });
+                        let scaled =
+                            (ratio * DISCOVERY_PROGRESS_WEIGHT).min(DISCOVERY_PROGRESS_WEIGHT);
+                        if evt_tx
+                            .send(WorkerEvent::ScanProgress { ratio: scaled })
+                            .is_err()
+                        {
+                            stop_flag.store(true, Ordering::Relaxed);
+                            return false;
+                        }
+                        true
                     });
+                    if stop.load(Ordering::Relaxed) {
+                        break 'worker_loop;
+                    }
                     log_debug(&format!(
                         "Discovery complete repos={} elapsed_ms={}",
                         repos.len(),
@@ -61,9 +83,14 @@ pub fn spawn_worker(
                     ));
 
                     // Parallelize status fetching
-                    let states = fetch_status_parallel(repos, &evt_tx);
+                    let (states, channel_closed) = fetch_status_parallel(repos, &evt_tx);
+                    if channel_closed {
+                        break 'worker_loop;
+                    }
 
-                    let _ = evt_tx.send(WorkerEvent::ScanComplete(states));
+                    if evt_tx.send(WorkerEvent::ScanComplete(states)).is_err() {
+                        break 'worker_loop;
+                    }
                     log_debug(&format!(
                         "Scan complete elapsed_ms={}",
                         scan_start.elapsed().as_millis()
@@ -71,33 +98,50 @@ pub fn spawn_worker(
                 }
                 WorkerCmd::Refresh { repos } => {
                     // Parallelize refresh as well
-                    let refreshed = fetch_status_parallel(repos, &evt_tx);
-                    let _ = evt_tx.send(WorkerEvent::RefreshComplete(refreshed));
+                    let (refreshed, channel_closed) = fetch_status_parallel(repos, &evt_tx);
+                    if channel_closed {
+                        break 'worker_loop;
+                    }
+                    if evt_tx
+                        .send(WorkerEvent::RefreshComplete(refreshed))
+                        .is_err()
+                    {
+                        break 'worker_loop;
+                    }
                 }
                 WorkerCmd::Action { path, action } => {
                     let result = match action {
                         Action::Pull => git_pull(&path),
                         Action::Push => git_push(&path),
                     };
-                    let _ = evt_tx.send(WorkerEvent::ActionResult {
-                        path,
-                        action,
-                        result,
-                    });
+                    if evt_tx
+                        .send(WorkerEvent::ActionResult {
+                            path,
+                            action,
+                            result,
+                        })
+                        .is_err()
+                    {
+                        break 'worker_loop;
+                    }
                 }
-                WorkerCmd::Quit => break,
+                WorkerCmd::Quit => break 'worker_loop,
             }
         }
     })
 }
 
-fn fetch_status_parallel(repos: Vec<RepoRef>, evt_tx: &Sender<WorkerEvent>) -> Vec<RepoState> {
+fn fetch_status_parallel(
+    repos: Vec<RepoRef>,
+    evt_tx: &Sender<WorkerEvent>,
+) -> (Vec<RepoState>, bool) {
     use std::sync::mpsc::channel;
     use std::sync::{Arc, Mutex};
 
     let total_repos = repos.len().max(1);
     let states = Arc::new(Mutex::new(Vec::with_capacity(repos.len())));
     let completed = Arc::new(Mutex::new(0usize));
+    let stop = Arc::new(AtomicBool::new(false));
 
     // Determine worker count: use available parallelism, cap at 16 to avoid overwhelming the system
     let worker_count = thread::available_parallelism()
@@ -128,10 +172,14 @@ fn fetch_status_parallel(repos: Vec<RepoRef>, evt_tx: &Sender<WorkerEvent>) -> V
             let work_rx = Arc::clone(&work_rx);
             let states = Arc::clone(&states);
             let completed = Arc::clone(&completed);
+            let stop = Arc::clone(&stop);
             let evt_tx = evt_tx.clone();
 
             let handle = scope.spawn(move || {
                 loop {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
                     // Get next work item
                     let work_item = {
                         let rx = work_rx.lock().unwrap();
@@ -142,6 +190,9 @@ fn fetch_status_parallel(repos: Vec<RepoRef>, evt_tx: &Sender<WorkerEvent>) -> V
                         Ok(item) => item,
                         Err(_) => break, // Channel closed, no more work
                     };
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
 
                     let status_start = Instant::now();
                     let state = match git_status(&repo.path, &repo.git_dir) {
@@ -172,8 +223,12 @@ fn fetch_status_parallel(repos: Vec<RepoRef>, evt_tx: &Sender<WorkerEvent>) -> V
                         *c
                     };
 
-                    let ratio = 0.4 + count as f64 / total_repos as f64 * 0.6;
-                    let _ = evt_tx.send(WorkerEvent::ScanProgress { ratio });
+                    let ratio = DISCOVERY_PROGRESS_WEIGHT
+                        + count as f64 / total_repos as f64 * STATUS_PROGRESS_WEIGHT;
+                    if evt_tx.send(WorkerEvent::ScanProgress { ratio }).is_err() {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
                 }
             });
 
@@ -189,5 +244,9 @@ fn fetch_status_parallel(repos: Vec<RepoRef>, evt_tx: &Sender<WorkerEvent>) -> V
     // Sort by original index to maintain order
     let mut results = Arc::try_unwrap(states).unwrap().into_inner().unwrap();
     results.sort_by_key(|(idx, _)| *idx);
-    results.into_iter().map(|(_, state)| state).collect()
+    let channel_closed = stop.load(Ordering::Relaxed);
+    (
+        results.into_iter().map(|(_, state)| state).collect(),
+        channel_closed,
+    )
 }
