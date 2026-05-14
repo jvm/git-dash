@@ -70,25 +70,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn parse_args() -> Result<Config, Box<dyn std::error::Error>> {
     let mut root: Option<PathBuf> = None;
     let mut debug = false;
-    for arg in std::env::args().skip(1) {
-        match arg.as_str() {
-            "--help" | "-h" => {
-                print_help();
-                std::process::exit(0);
-            }
-            "--debug" | "-d" => {
-                debug = true;
-            }
-            _ if arg.starts_with('-') => {
-                return Err(format!("Unknown option: {arg}").into());
-            }
-            _ => {
-                if root.is_some() {
-                    return Err("Too many arguments".into());
-                }
-                root = Some(PathBuf::from(arg));
-            }
+    // nosemgrep: rust.lang.security.args-os.args-os -- CLI parsing skips argv[0] and does not make security decisions from it.
+    for arg in std::env::args_os().skip(1) {
+        if arg == "--help" || arg == "-h" {
+            print_help();
+            std::process::exit(0);
         }
+        if arg == "--debug" || arg == "-d" {
+            debug = true;
+            continue;
+        }
+
+        if arg.to_string_lossy().starts_with('-') {
+            return Err(format!("Unknown option: {}", arg.to_string_lossy()).into());
+        }
+
+        if root.is_some() {
+            return Err("Too many arguments".into());
+        }
+        root = Some(PathBuf::from(arg));
     }
 
     Ok(Config {
